@@ -8,12 +8,13 @@
 # - Help menus and navigation
 # - Download cancel buttons
 # - Settings buttons
+#
+# MODIFIED: Source button removed from start_key()
 # ==============================================================================
 
 from pyrogram import types
 
 from HasiiMusic import app, config, lang
-
 
 
 class Inline:
@@ -44,7 +45,6 @@ class Inline:
             )
 
         if not remove:
-            # Seek buttons row
             keyboard.append(
                 [
                     self.ikb(
@@ -57,7 +57,6 @@ class Inline:
                         text="30 »", callback_data=f"controls seek_forward_30 {chat_id}"),
                 ]
             )
-            # Main control buttons row
             keyboard.append(
                 [
                     self.ikb(
@@ -72,7 +71,6 @@ class Inline:
                         text="▢", callback_data=f"controls stop {chat_id}"),
                 ]
             )
-            # Delete button as full-width button at bottom
             keyboard.append(
                 [
                     self.ikb(
@@ -84,7 +82,6 @@ class Inline:
     def help_markup(
         self, _lang: dict, back: bool = False
     ) -> types.InlineKeyboardMarkup:
-        """Create help menu with categorized buttons."""
         if back:
             rows = [
                 [
@@ -92,7 +89,6 @@ class Inline:
                 ]
             ]
         else:
-            # Help menu with categorized buttons (3 per row)
             rows = [
                 [
                     self.ikb(text="ᴀᴅᴍɪɴꜱ", callback_data="help_admins"),
@@ -124,7 +120,6 @@ class Inline:
                 ]
             ]
         return self.ikm(rows)
-
 
     def ping_markup(self, text: str) -> types.InlineKeyboardMarkup:
         return self.ikm([
@@ -183,7 +178,7 @@ class Inline:
             ]
         )
 
-        def start_key(
+    def start_key(
         self, lang: dict, private: bool = False
     ) -> types.InlineKeyboardMarkup:
         rows = [
@@ -200,7 +195,7 @@ class Inline:
             ],
         ]
         return self.ikm(rows)
-        
+
     def yt_key(self, link: str) -> types.InlineKeyboardMarkup:
         return self.ikm(
             [
