@@ -1,23 +1,12 @@
-# ==============================================================================
-# __main__.py - Main Entry Point for ˹ʜᴀꜱɪɪ ᴍᴜꜱɪᴄ˼
-# ==============================================================================
-# This is the main file that starts the bot. It performs the following:
-# 1. Connects to the database
-# 2. Starts the bot client
-# 3. Starts assistant (userbot) clients
-# 4. Loads all plugin modules
-# 5. Initializes YouTube cookies if configured
-# 6. Keeps the bot running until manually stopped
-# ==============================================================================
-
 import asyncio
 import importlib
+import os
 import sys
+import glob
+import time
 
 from pyrogram import idle
 
-# Raise the file descriptor limit on Linux to avoid "[Errno 24] Too many open files"
-# when serving many groups concurrently (each audio stream + ffmpeg probe opens FDs).
 if sys.platform != "win32":
     try:
         import resource
@@ -28,60 +17,160 @@ if sys.platform != "win32":
     except Exception:
         pass
 
-from HasiiMusic import (tune, app, config, db,
-                   logger, stop, userbot, yt)
+from HasiiMusic import (tune, app, config, db, logger, stop, tasks, userbot, yt)
 from HasiiMusic.plugins import all_modules
+
+COOKIE_REFRESH_HOURS = 12
+DISK_CLEANUP_HOURS = 6
+MAX_DOWNLOAD_AGE_HOURS = 24
+
+
+async def _notify(text: str):
+    try:
+        if config.LOGGER_ID:
+            await app.send_message(config.LOGGER_ID, text, parse_mode="html")
+    except Exception:
+        pass
+
+
+async def auto_refresh_cookies():
+    while True:
+        await asyncio.sleep(COOKIE_REFRESH_HOURS * 60 * 60)
+        if not config.COOKIES_URL:
+            continue
+        try:
+            deleted = 0
+            for f in os.listdir("HasiiMusic/cookies"):
+                if f.endswith(".txt") and f != "cookies.txt":
+                    os.remove(f"HasiiMusic/cookies/{f}")
+                    deleted += 1
+            yt.cookies.clear()
+            yt.checked = False
+            yt.warned = False
+            await yt.save_cookies(config.COOKIES_URL)
+            if yt.cookies:
+                logger.info(f"🍪 Cookie auto-refresh done: {len(yt.cookies)} file(s)")
+                await _notify(
+                    f"<blockquote><b>🍪 Cookie Auto-Refresh ✅</b></blockquote>\n\n"
+                    f"<blockquote>Deleted: <b>{deleted}</b> old file(s)\n"
+                    f"Loaded: <b>{len(yt.cookies)}</b> new file(s)\n"
+                    f"Next refresh in: <b>{COOKIE_REFRESH_HOURS}h</b></blockquote>"
+                )
+            else:
+                logger.error("❌ Cookie auto-refresh failed — no cookies loaded!")
+                await _notify(
+                    "<blockquote><b>⚠️ Cookie Refresh Failed!</b></blockquote>\n\n"
+                    "<blockquote>Cookies download nahi huin!\n"
+                    "Fix: <code>/setcookies &lt;url&gt;</code></blockquote>"
+                )
+        except Exception as e:
+            logger.error(f"Cookie auto-refresh error: {e}")
+            await _notify(
+                f"<blockquote><b>❌ Cookie Refresh Error</b></blockquote>\n\n"
+                f"<blockquote>{str(e)}</blockquote>"
+            )
+
+
+async def auto_disk_cleanup():
+    while True:
+        await asyncio.sleep(DISK_CLEANUP_HOURS * 60 * 60)
+        try:
+            now = time.time()
+            cleaned = 0
+            freed_mb = 0.0
+            downloads_dir = "downloads"
+            if os.path.exists(downloads_dir):
+                for f in glob.glob(f"{downloads_dir}/*"):
+                    if os.path.isfile(f):
+                        age_hours = (now - os.path.getmtime(f)) / 3600
+                        if age_hours > MAX_DOWNLOAD_AGE_HOURS:
+                            size = os.path.getsize(f) / (1024 * 1024)
+                            os.remove(f)
+                            cleaned += 1
+                            freed_mb += size
+            if cleaned > 0:
+                logger.info(f"🧹 Disk cleanup: removed {cleaned} files ({freed_mb:.1f} MB freed)")
+                await _notify(
+                    f"<blockquote><b>🧹 Auto Disk Cleanup</b></blockquote>\n\n"
+                    f"<blockquote>Removed: <b>{cleaned}</b> old file(s)\n"
+                    f"Freed: <b>{freed_mb:.1f} MB</b></blockquote>"
+                )
+        except Exception as e:
+            logger.error(f"Disk cleanup error: {e}")
 
 
 async def main():
     try:
-        # Step 1: Connect to MongoDB database
         await db.connect()
-        
-        # Step 2: Start the main bot client
         await app.boot()
-        
-        # Step 3: Start assistant/userbot clients (for joining voice chats)
         await userbot.boot()
-        
-        # Step 4: Initialize voice call handler
         await tune.boot()
 
-        # Step 5: Load all plugin modules (commands like /play, /pause, etc.)
+        failed_plugins = []
         for module in all_modules:
             try:
                 importlib.import_module(f"HasiiMusic.plugins.{module}")
             except Exception as e:
                 logger.error(f"Failed to load plugin {module}: {e}", exc_info=True)
-        logger.info(f"🔌 Loaded {len(all_modules)} plugin modules.")
+                failed_plugins.append(module)
+        logger.info(f"🔌 Plugins: {len(all_modules) - len(failed_plugins)}/{len(all_modules)} loaded.")
 
-        # Step 6: Download YouTube cookies if URLs are provided (for age-restricted videos)
         if config.COOKIES_URL:
             try:
                 await yt.save_cookies(config.COOKIES_URL)
+                if yt.cookies:
+                    logger.info(f"🍪 Cookies loaded: {len(yt.cookies)} file(s)")
+                else:
+                    logger.warning("⚠️ COOKIE_URL set hai lekin cookies load nahi huin!")
+                    await _notify(
+                        "<blockquote><b>⚠️ Cookie Warning</b></blockquote>\n\n"
+                        "<blockquote>COOKIE_URL set hai but cookies load nahi huin!\n"
+                        "Fix: <code>/setcookies &lt;url&gt;</code></blockquote>"
+                    )
             except Exception as e:
-                logger.error(f"Failed to download cookies: {e}")
+                logger.error(f"Cookie load error: {e}")
+        else:
+            logger.warning("⚠️ COOKIE_URL not set — YouTube might fail!")
 
-        # Step 7: Load sudo users and blacklisted users from database
+        if config.COOKIES_URL:
+            t1 = asyncio.create_task(auto_refresh_cookies())
+            tasks.append(t1)
+            logger.info(f"⏰ Cookie auto-refresh started (every {COOKIE_REFRESH_HOURS}h)")
+
+        t2 = asyncio.create_task(auto_disk_cleanup())
+        tasks.append(t2)
+        logger.info(f"🧹 Disk cleanup started (every {DISK_CLEANUP_HOURS}h)")
+
         sudoers = await db.get_sudoers()
-        app.sudoers.update(sudoers)  # Add sudo users to set
-        app.sudo_filter.update(sudoers)  # Add sudo users to filter
-        app.bl_users.update(await db.get_blacklisted())  # Add blacklisted users to filter
-        logger.info(f"👑 Loaded {len(app.sudoers)} sudo users.")
-        logger.info("\n🎉 Bot started successfully! Ready to play music! 🎵\n")
+        app.sudoers.update(sudoers)
+        app.sudo_filter.update(sudoers)
+        app.bl_users.update(await db.get_blacklisted())
+        logger.info(f"👑 Sudo users: {len(app.sudoers)}")
 
-        # Step 8: Keep the bot running (press Ctrl+C to stop)
+        await _notify(
+            f"<blockquote><b>🎵 {app.name} Started! ✅</b></blockquote>\n\n"
+            f"<blockquote>"
+            f"🔌 Plugins: <b>{len(all_modules) - len(failed_plugins)}/{len(all_modules)}</b>\n"
+            f"🍪 Cookies: <b>{len(yt.cookies)}</b> file(s)\n"
+            f"👑 Sudo users: <b>{len(app.sudoers)}</b>\n"
+            f"⏰ Cookie refresh: every <b>{COOKIE_REFRESH_HOURS}h</b>\n"
+            f"🧹 Disk cleanup: every <b>{DISK_CLEANUP_HOURS}h</b>"
+            f"</blockquote>"
+        )
+
+        logger.info("\n🎉 Bot started! Ready to play music! 🎵\n")
+
         try:
             await idle()
         except KeyboardInterrupt:
-            logger.info("Received stop signal...")
+            logger.info("Stop signal received...")
         except Exception as e:
-            logger.error(f"Error during idle: {e}", exc_info=True)
-        
-        # Step 9: Cleanup and shutdown when bot is stopped
+            logger.error(f"Idle error: {e}", exc_info=True)
+
         await stop()
+
     except Exception as e:
-        logger.error(f"Critical error in main: {e}", exc_info=True)
+        logger.error(f"Critical error: {e}", exc_info=True)
         raise
 
 
@@ -90,17 +179,15 @@ if __name__ == "__main__":
         loop = asyncio.get_event_loop()
         loop.run_until_complete(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user (Ctrl+C)")
+        logger.info("Bot stopped by user.")
     except SystemExit as e:
-        logger.error(f"Bot exited with system error: {e}")
+        logger.error(f"System exit: {e}")
         raise
     except Exception as e:
-        logger.error(f"Unexpected error caused bot to stop: {e}", exc_info=True)
-        # Don't raise - allow clean shutdown
+        logger.error(f"Unexpected error: {e}", exc_info=True)
     finally:
-        # Ensure cleanup happens
         try:
             if loop.is_running():
                 loop.stop()
-        except:
+        except Exception:
             pass
