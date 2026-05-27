@@ -1,25 +1,29 @@
-# ==============================================================================
-# couple.py - Couples Feature
-# ==============================================================================
-# Commands:
-# - /couple @user   — Propose a couple pairing
-# - /uncouple       — Remove your couple
-# - /mycouple       — Check who your couple is (ya reply pe check karo)
-# ==============================================================================
-
 import random
 
-from pyrogram import enums, filters, types
+from pyrogram import filters, types
 
 from HasiiMusic import app, db
 
 
 COUPLE_GIFS = [
-    "https://media.giphy.com/media/l4pTdcifPZLpDjL1e/giphy.gif",
-    "https://media.giphy.com/media/xT1XGYy9NPhWRPp4re/giphy.gif",
-    "https://media.giphy.com/media/TJ9LupxFBNUgo/giphy.gif",
-    "https://media.giphy.com/media/3o6Zt6KHxJTbXCnSvu/giphy.gif",
-    "https://media.giphy.com/media/26BRrSvJEqmYfdBC4/giphy.gif",
+    "https://media2.giphy.com/media/8Vk5ZW0vu4Kha/giphy.gif",
+    "https://media2.giphy.com/media/l4pTdcifPZLpDjL1e/giphy.gif",
+    "https://media2.giphy.com/media/OR4N5Y6ePt684/giphy.gif",
+    "https://media2.giphy.com/media/zTZrYp2C7JMly/giphy.gif",
+    "https://media2.giphy.com/media/CwyORe13mVKiQ/giphy.gif",
+]
+
+LOVE_QUOTES = [
+    "ɪɴ ʏᴏᴜʀ ᴀʀᴍꜱ ɪꜱ ᴇxᴀᴄᴛʟʏ ᴡʜᴇʀᴇ ɪ ʙᴇʟᴏɴɢ 🌹",
+    "ʏᴏᴜ ᴀʀᴇ ᴛʜᴇ ʙᴇꜱᴛ ᴛʜɪɴɢ ᴛʜᴀᴛ ᴇᴠᴇʀ ʜᴀᴘᴘᴇɴᴇᴅ ᴛᴏ ᴍᴇ 💫",
+    "ʟᴏᴠᴇ ɪꜱ ɴᴏᴛ ᴊᴜꜱᴛ ᴀ ꜰᴇᴇʟɪɴɢ, ɪᴛ'ꜱ ᴀ ᴘʀᴏᴍɪꜱᴇ 🌸",
+    "ᴡɪᴛʜ ʏᴏᴜ, ᴇᴠᴇʀʏ ᴍᴏᴍᴇɴᴛ ꜰᴇᴇʟꜱ ʟɪᴋᴇ ᴀ ᴅʀᴇᴀᴍ ✨",
+    "ɪ ᴄʜᴏᴏꜱᴇ ʏᴏᴜ. ᴀɴᴅ ɪ'ʟʟ ᴄʜᴏᴏꜱᴇ ʏᴏᴜ ᴏᴠᴇʀ ᴀɴᴅ ᴏᴠᴇʀ 💕",
+    "ʏᴏᴜ ᴀʀᴇ ᴍʏ ꜱᴜɴꜱʜɪɴᴇ ᴏɴ ᴀ ʀᴀɪɴʏ ᴅᴀʏ ☀️",
+    "ᴇᴠᴇʀʏ ʟᴏᴠᴇ ꜱᴛᴏʀʏ ɪꜱ ʙᴇᴀᴜᴛɪꜰᴜʟ, ʙᴜᴛ ᴏᴜʀꜱ ɪꜱ ᴍʏ ꜰᴀᴠᴏᴜʀɪᴛᴇ 💖",
+    "ᴛᴏɢᴇᴛʜᴇʀ ɪꜱ ᴀ ᴡᴏɴᴅᴇʀꜰᴜʟ ᴘʟᴀᴄᴇ ᴛᴏ ʙᴇ 🫶",
+    "ʏᴏᴜ ᴀʀᴇ ᴍʏ ꜰᴀᴠᴏᴜʀɪᴛᴇ ʜᴇʟʟᴏ ᴀɴᴅ ʜᴀʀᴅᴇꜱᴛ ɢᴏᴏᴅʙʏᴇ 🥺",
+    "ɪ ꜰᴀʟʟ ɪɴ ʟᴏᴠᴇ ᴡɪᴛʜ ʏᴏᴜ ᴀ ʟɪᴛᴛʟᴇ ᴍᴏʀᴇ ᴇᴠᴇʀʏ ᴅᴀʏ 🌺",
 ]
 
 
@@ -27,8 +31,8 @@ async def _get_couple(user_id: int):
     return await db.mongo.HasiiTune.couples.find_one({"user_id": user_id})
 
 
-async def _set_couple(user1_id: int, user2_id: int):
-    for uid, pid in [(user1_id, user2_id), (user2_id, user1_id)]:
+async def _set_couple(u1: int, u2: int):
+    for uid, pid in [(u1, u2), (u2, u1)]:
         await db.mongo.HasiiTune.couples.update_one(
             {"user_id": uid},
             {"$set": {"user_id": uid, "partner_id": pid}},
@@ -39,32 +43,36 @@ async def _set_couple(user1_id: int, user2_id: int):
 async def _del_couple(user_id: int):
     doc = await _get_couple(user_id)
     if doc:
-        partner_id = doc.get("partner_id")
+        pid = doc.get("partner_id")
         await db.mongo.HasiiTune.couples.delete_one({"user_id": user_id})
-        if partner_id:
-            await db.mongo.HasiiTune.couples.delete_one({"user_id": partner_id})
+        if pid:
+            await db.mongo.HasiiTune.couples.delete_one({"user_id": pid})
 
 
-async def _send_couple_gif(chat_id: int, u1: types.User, u2: types.User):
+async def _send_couple_card(chat_id: int, u1: types.User, u2: types.User):
     m1 = f"<a href='tg://user?id={u1.id}'>{u1.first_name}</a>"
     m2 = f"<a href='tg://user?id={u2.id}'>{u2.first_name}</a>"
+    quote = random.choice(LOVE_QUOTES)
+
     caption = (
-        f"╔══════════════════╗\n"
-        f"   💑  ɴᴇᴡ ᴄᴏᴜᴘʟᴇ ᴀʟᴇʀᴛ  💑\n"
-        f"╚══════════════════╝\n\n"
+        f"<b>╔══[ 💑 ɴᴇᴡ ᴄᴏᴜᴘʟᴇ ]══╗</b>\n\n"
         f"  ❤️  {m1}\n"
+        f"         ×\n"
         f"  🩷  {m2}\n\n"
-        f"  ᴡɪꜱʜɪɴɢ ʏᴏᴜ ʙᴏᴛʜ ᴀ ʙᴇᴀᴜᴛɪꜰᴜʟ\n"
-        f"  ᴊᴏᴜʀɴᴇʏ ᴛᴏɢᴇᴛʜᴇʀ ᴀʟᴡᴀʏꜱ 🌹"
+        f"<blockquote>{quote}</blockquote>\n\n"
+        f"<b>╚════════════════╝</b>"
     )
-    gif_url = random.choice(COUPLE_GIFS)
-    try:
-        await app.send_animation(chat_id, animation=gif_url, caption=caption)
-    except Exception:
+
+    for gif in random.sample(COUPLE_GIFS, len(COUPLE_GIFS)):
         try:
-            await app.send_message(chat_id, f"<blockquote>{caption}</blockquote>")
+            await app.send_animation(chat_id, animation=gif, caption=caption)
+            return
         except Exception:
-            pass
+            continue
+    try:
+        await app.send_message(chat_id, caption, disable_web_page_preview=True)
+    except Exception:
+        pass
 
 
 @app.on_message(filters.command("couple") & filters.group)
@@ -93,10 +101,9 @@ async def couple_cmd(_, message: types.Message):
             return await message.reply_text(
                 "<blockquote>❌ ɴᴏᴛ ᴇɴᴏᴜɢʜ ᴍᴇᴍʙᴇʀꜱ!</blockquote>"
             )
-
         u1, u2 = random.sample(members, 2)
         await _set_couple(u1.id, u2.id)
-        await _send_couple_gif(chat_id, u1, u2)
+        await _send_couple_card(chat_id, u1, u2)
         return
 
     target = None
@@ -109,16 +116,15 @@ async def couple_cmd(_, message: types.Message):
             return await message.reply_text(
                 "<blockquote>❌ ᴜꜱᴇʀ ɴᴏᴛ ꜰᴏᴜɴᴅ.</blockquote>"
             )
-
     if not target:
         return
     if target.id == user.id:
         return await message.reply_text(
-            "<blockquote>💔 ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴄᴏᴜᴘʟᴇ ᴡɪᴛʜ ʏᴏᴜʀꜱᴇʟꜰ! 😅</blockquote>"
+            "<blockquote>💔 ʏᴏᴜ ᴄᴀɴ'ᴛ ᴄᴏᴜᴘʟᴇ ᴡɪᴛʜ ʏᴏᴜʀꜱᴇʟꜰ 😅</blockquote>"
         )
     if target.is_bot:
         return await message.reply_text(
-            "<blockquote>🤖 ʙᴏᴛꜱ ᴄᴀɴɴᴏᴛ ʙᴇ ᴀ ᴄᴏᴜᴘʟᴇ ᴘᴀʀᴛɴᴇʀ!</blockquote>"
+            "<blockquote>🤖 ʙᴏᴛꜱ ᴄᴀɴɴᴏᴛ ʙᴇ ᴄᴏᴜᴘʟᴇᴅ!</blockquote>"
         )
     if await _get_couple(user.id):
         return await message.reply_text(
@@ -129,9 +135,8 @@ async def couple_cmd(_, message: types.Message):
         return await message.reply_text(
             f"<blockquote>💔 {target.mention} ɪꜱ ᴀʟʀᴇᴀᴅʏ ɪɴ ᴀ ᴄᴏᴜᴘʟᴇ!</blockquote>"
         )
-
     await _set_couple(user.id, target.id)
-    await _send_couple_gif(chat_id, user, target)
+    await _send_couple_card(chat_id, user, target)
 
 
 @app.on_message(filters.command("uncouple") & filters.group)
@@ -142,27 +147,22 @@ async def uncouple_cmd(_, message: types.Message):
         pass
     if not message.from_user:
         return
-
     doc = await _get_couple(message.from_user.id)
     if not doc:
         return await message.reply_text(
             "<blockquote>💔 ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴀ ᴄᴏᴜᴘʟᴇ ʏᴇᴛ.</blockquote>"
         )
-
-    partner_id = doc.get("partner_id")
-    partner_mention = "ᴜɴᴋɴᴏᴡɴ"
-    if partner_id:
+    pm = "ᴜɴᴋɴᴏᴡɴ"
+    if pid := doc.get("partner_id"):
         try:
-            partner = await app.get_users(partner_id)
-            partner_mention = partner.mention
+            p = await app.get_users(pid)
+            pm = p.mention
         except Exception:
             pass
-
     await _del_couple(message.from_user.id)
     await message.reply_text(
-        f"<blockquote>💔 {message.from_user.mention} ᴀɴᴅ {partner_mention} ʜᴀᴠᴇ\n"
-        f"ʙʀᴏᴋᴇɴ ᴜᴘ 🌧️\n\n"
-        f"ꜱᴏᴍᴇᴛɪᴍᴇꜱ ᴇɴᴅɪɴɢꜱ ʟᴇᴀᴅ ᴛᴏ ɴᴇᴡ ʙᴇɢɪɴɴɪɴɢꜱ.</blockquote>"
+        f"<blockquote>💔 {message.from_user.mention} ᴀɴᴅ {pm} ʜᴀᴠᴇ ʙʀᴏᴋᴇɴ ᴜᴘ 🌧️\n\n"
+        f"ꜱᴏᴍᴇᴛɪᴍᴇꜱ ᴇɴᴅɪɴɢꜱ ʟᴇᴀᴅ ᴛᴏ ʙᴇᴛᴛᴇʀ ʙᴇɢɪɴɴɪɴɢꜱ 🌱</blockquote>"
     )
 
 
@@ -174,29 +174,25 @@ async def mycouple_cmd(_, message: types.Message):
         pass
     if not message.from_user:
         return
-
-    check_user = message.from_user
+    check = message.from_user
     if message.reply_to_message and message.reply_to_message.from_user:
-        check_user = message.reply_to_message.from_user
-
-    doc = await _get_couple(check_user.id)
+        check = message.reply_to_message.from_user
+    doc = await _get_couple(check.id)
     if not doc:
         return await message.reply_text(
-            f"<blockquote>💔 {check_user.mention} ɪꜱ ɴᴏᴛ ɪɴ ᴀ ᴄᴏᴜᴘʟᴇ ʏᴇᴛ.\n"
+            f"<blockquote>💔 {check.mention} ɪꜱ ɴᴏᴛ ɪɴ ᴀ ᴄᴏᴜᴘʟᴇ ʏᴇᴛ.\n"
             f"ᴜꜱᴇ /ᴄᴏᴜᴘʟᴇ ᴛᴏ ꜰɪɴᴅ ᴀ ᴍᴀᴛᴄʜ 💕</blockquote>"
         )
-
     try:
         partner = await app.get_users(doc["partner_id"])
-        partner_mention = partner.mention
+        pm = partner.mention
     except Exception:
-        partner_mention = "ᴜɴᴋɴᴏᴡɴ"
-
+        pm = "ᴜɴᴋɴᴏᴡɴ"
     await message.reply_text(
-        f"╔══════════════════╗\n"
-        f"   💑  ᴄᴏᴜᴘʟᴇ ɪɴꜰᴏ  💑\n"
-        f"╚══════════════════╝\n\n"
-        f"  ❤️  {check_user.mention}\n"
-        f"  🩷  {partner_mention}\n\n"
-        f"  ᴛᴏɢᴇᴛʜᴇʀ ᴀɴᴅ ʜᴀᴘᴘʏ! 🌸"
+        f"<b>╔══[ 💑 ᴄᴏᴜᴘʟᴇ ɪɴꜰᴏ ]══╗</b>\n\n"
+        f"  ❤️  {check.mention}\n"
+        f"         ×\n"
+        f"  🩷  {pm}\n\n"
+        f"<blockquote>ᴛᴏɢᴇᴛʜᴇʀ ᴀɴᴅ ʜᴀᴘᴘʏ ᴀʟᴡᴀʏꜱ 🌸</blockquote>\n\n"
+        f"<b>╚════════════════╝</b>"
     )
