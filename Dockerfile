@@ -9,9 +9,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Latest yt-dlp install (force upgrade)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --upgrade yt-dlp
+# Upgrade pip and install latest yt-dlp first
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir --upgrade yt-dlp
 
 # Copy requirements and install Python packages
 COPY requirements.txt .
