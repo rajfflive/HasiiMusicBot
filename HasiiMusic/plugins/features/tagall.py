@@ -1,10 +1,3 @@
-# ==============================================================================
-# tagall.py - Tag All Members Feature  (admins only)
-# ==============================================================================
-# /tagall [msg]     — Sab members ko tag karo
-# /tagadmins [msg]  — Sirf admins ko tag karo
-# ==============================================================================
-
 import asyncio
 
 from pyrogram import enums, filters, types
@@ -80,28 +73,25 @@ async def tagall_cmd(_, message: types.Message):
     await status.delete()
     _active_tags[chat_id] = True
 
-    if custom_msg:
-        try:
-            await app.send_message(
-                chat_id,
-                f"<blockquote>📢 {custom_msg}</blockquote>",
-                disable_notification=True,
-            )
-        except Exception:
-            pass
-
     chunk_size = 5
     for i in range(0, len(members), chunk_size):
         if not _active_tags.get(chat_id):
             break
+
         chunk = members[i : i + chunk_size]
-        mentions = "  ".join(
-            f"<a href='tg://user?id={u.id}'>{u.first_name}</a>" for u in chunk
-        )
+
+        # Har message mein: custom message (agar hai) + ek line pe ek mention
+        lines = []
+        if custom_msg:
+            lines.append(f"<blockquote>📢 {custom_msg}</blockquote>")
+        for u in chunk:
+            lines.append(f"<a href='tg://user?id={u.id}'>{u.first_name}</a>")
+
+        text = "\n".join(lines)
         try:
             await app.send_message(
                 chat_id,
-                mentions,
+                text,
                 disable_notification=True,
                 disable_web_page_preview=True,
             )
@@ -142,12 +132,14 @@ async def tagadmins_cmd(_, message: types.Message):
     if not admins:
         return await message.reply_text("<blockquote>❌ ɴᴏ ᴀᴅᴍɪɴꜱ ꜰᴏᴜɴᴅ.</blockquote>")
 
-    mentions = "  ".join(
-        f"<a href='tg://user?id={u.id}'>{u.first_name}</a>" for u in admins
-    )
-    header = f"<blockquote>🔔 {custom_msg}</blockquote>\n\n" if custom_msg else ""
+    lines = []
+    if custom_msg:
+        lines.append(f"<blockquote>🔔 {custom_msg}</blockquote>")
+    for u in admins:
+        lines.append(f"<a href='tg://user?id={u.id}'>{u.first_name}</a>")
+
     await message.reply_text(
-        header + mentions,
+        "\n".join(lines),
         disable_notification=True,
         disable_web_page_preview=True,
     )
