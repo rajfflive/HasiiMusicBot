@@ -1,28 +1,40 @@
-# ==============================================================================
-# _inline.py - Inline Keyboard Button Builder
-# ==============================================================================
-# This file provides helper functions to create inline keyboard buttons.
-# Used to build:
-# - Playback control buttons (play, pause, skip, stop, etc.)
-# - Language selection menus
-# - Help menus and navigation
-# - Download cancel buttons
-# - Settings buttons
-#
-# MODIFIED: Source button removed from start_key()
-# ==============================================================================
-
-from pyrogram import types
+from pyrogram import types as ptypes
 from HasiiMusic import app, config
+
+
+class SBtn:
+    """
+    Styled button wrapper for Pyrogram.
+    style: 'primary' | 'success' | 'danger' | 'warning'
+    """
+    def __init__(self, text, style=None, callback_data=None, url=None, copy_text=None):
+        self.text = text
+        self.style = style
+        self.callback_data = callback_data
+        self.url = url
+        self.copy_text = copy_text
+
+    def build(self) -> ptypes.InlineKeyboardButton:
+        kwargs = {"text": self.text}
+        if self.callback_data:
+            kwargs["callback_data"] = self.callback_data
+        if self.url:
+            kwargs["url"] = self.url
+        if self.copy_text:
+            kwargs["copy_text"] = self.copy_text
+        return ptypes.InlineKeyboardButton(**kwargs)
+
+
+def _b(text, style=None, **kw) -> ptypes.InlineKeyboardButton:
+    return SBtn(text, style=style, **kw).build()
 
 
 class Inline:
     def __init__(self):
-        self.ikm = types.InlineKeyboardMarkup
-        self.ikb = types.InlineKeyboardButton
+        self.ikm = ptypes.InlineKeyboardMarkup
 
-    def cancel_dl(self, text) -> types.InlineKeyboardMarkup:
-        return self.ikm([[self.ikb(text=f"{text}", callback_data="cancel_dl")]])
+    def cancel_dl(self, text) -> ptypes.InlineKeyboardMarkup:
+        return self.ikm([[_b(text, style="danger", callback_data="cancel_dl")]])
 
     def controls(
         self,
@@ -30,141 +42,130 @@ class Inline:
         status: str = None,
         timer: str = None,
         remove: bool = False,
-    ) -> types.InlineKeyboardMarkup:
+    ) -> ptypes.InlineKeyboardMarkup:
         keyboard = []
         if status:
-            keyboard.append(
-                [self.ikb(text=f"🎵 {status}", callback_data=f"controls status {chat_id}")]
-            )
+            keyboard.append([_b(status, style="primary",
+                                callback_data=f"controls status {chat_id}")])
         elif timer:
-            keyboard.append(
-                [self.ikb(text=f"⏱ {timer}", callback_data=f"controls status {chat_id}")]
-            )
+            keyboard.append([_b(timer, style="primary",
+                                callback_data=f"controls status {chat_id}")])
         if not remove:
             keyboard.append([
-                self.ikb(text="«30", callback_data=f"controls seek_back_30 {chat_id}"),
-                self.ikb(text="«10", callback_data=f"controls seek_back_10 {chat_id}"),
-                self.ikb(text="10»", callback_data=f"controls seek_forward_10 {chat_id}"),
-                self.ikb(text="30»", callback_data=f"controls seek_forward_30 {chat_id}"),
+                _b("« 30",  callback_data=f"controls seek_back_30 {chat_id}"),
+                _b("« 10",  callback_data=f"controls seek_back_10 {chat_id}"),
+                _b("10 »",  callback_data=f"controls seek_forward_10 {chat_id}"),
+                _b("30 »",  callback_data=f"controls seek_forward_30 {chat_id}"),
             ])
             keyboard.append([
-                self.ikb(text="▷", callback_data=f"controls resume {chat_id}"),
-                self.ikb(text="II", callback_data=f"controls pause {chat_id}"),
-                self.ikb(text="↻", callback_data=f"controls replay {chat_id}"),
-                self.ikb(text="⏭", callback_data=f"controls skip {chat_id}"),
-                self.ikb(text="⏹", callback_data=f"controls stop {chat_id}"),
+                _b("▷",   style="success", callback_data=f"controls resume {chat_id}"),
+                _b("II",  style="primary", callback_data=f"controls pause {chat_id}"),
+                _b("↻",   style="primary", callback_data=f"controls replay {chat_id}"),
+                _b("‣‣I", style="primary", callback_data=f"controls skip {chat_id}"),
+                _b("▢",   style="danger",  callback_data=f"controls stop {chat_id}"),
             ])
-            keyboard.append(
-                [self.ikb(text=" ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}")]
-            )
+            keyboard.append([
+                _b("ᴅᴇʟᴇᴛᴇ", style="danger",
+                   callback_data=f"controls close {chat_id}")
+            ])
         return self.ikm(keyboard)
 
     def help_markup(
         self, _lang: dict, back: bool = False
-    ) -> types.InlineKeyboardMarkup:
+    ) -> ptypes.InlineKeyboardMarkup:
         if back:
-            rows = [[self.ikb(text=" ʙᴀᴄᴋ", callback_data="help_main")]]
+            rows = [[_b("ʙᴀᴄᴋ", style="primary", callback_data="help_main")]]
         else:
             rows = [
                 [
-                    self.ikb(text=" ᴀᴅᴍɪɴꜱ", callback_data="help_admins"),
-                    self.ikb(text=" ᴀᴜᴛʜ", callback_data="help_auth"),
-                    self.ikb(text=" ʙʀᴏᴀᴅᴄᴀꜱᴛ", callback_data="help_broadcast"),
+                    _b("ᴀᴅᴍɪɴꜱ",    style="primary", callback_data="help_admins"),
+                    _b("ᴀᴜᴛʜ",      style="primary", callback_data="help_auth"),
+                    _b("ʙʀᴏᴀᴅᴄᴀꜱᴛ", style="primary", callback_data="help_broadcast"),
                 ],
                 [
-                    self.ikb(text=" ʙʟ-ᴄʜᴀᴛ", callback_data="help_blchat"),
-                    self.ikb(text=" ʙʟ-ᴜꜱᴇʀ", callback_data="help_bluser"),
-                    self.ikb(text=" ɢ-ʙᴀɴ", callback_data="help_gban"),
+                    _b("ʙʟ-ᴄʜᴀᴛ", style="danger", callback_data="help_blchat"),
+                    _b("ʙʟ-ᴜꜱᴇʀ", style="danger", callback_data="help_bluser"),
+                    _b("ɢ-ʙᴀɴ",   style="danger", callback_data="help_gban"),
                 ],
                 [
-                    self.ikb(text=" ʟᴏᴏᴘ", callback_data="help_loop"),
-                    self.ikb(text=" ᴘʟᴀʏ", callback_data="help_play"),
-                    self.ikb(text=" ǫᴜᴇᴜᴇ", callback_data="help_queue"),
+                    _b("ʟᴏᴏᴘ",   style="success", callback_data="help_loop"),
+                    _b("ᴘʟᴀʏ",   style="success", callback_data="help_play"),
+                    _b("ǫᴜᴇᴜᴇ", style="success", callback_data="help_queue"),
                 ],
                 [
-                    self.ikb(text=" ꜱᴇᴇᴋ", callback_data="help_seek"),
-                    self.ikb(text=" ꜱʜᴜꜰꜰʟᴇ", callback_data="help_shuffle"),
-                    self.ikb(text=" ᴘɪɴɢ", callback_data="help_ping"),
+                    _b("ꜱᴇᴇᴋ",    style="primary", callback_data="help_seek"),
+                    _b("ꜱʜᴜꜰꜰʟᴇ", style="primary", callback_data="help_shuffle"),
+                    _b("ᴘɪɴɢ",   style="primary", callback_data="help_ping"),
                 ],
                 [
-                    self.ikb(text=" ꜱᴛᴀᴛꜱ", callback_data="help_stats"),
-                    self.ikb(text=" ꜱᴜᴅᴏ", callback_data="help_sudo"),
-                    self.ikb(text="🔴 ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ", callback_data="help_maintenance"),
+                    _b("ꜱᴛᴀᴛꜱ",      style="primary", callback_data="help_stats"),
+                    _b("ꜱᴜᴅᴏ",       style="danger",  callback_data="help_sudo"),
+                    _b("ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ", style="danger",  callback_data="help_maintenance"),
                 ],
-                [self.ikb(text="🔵 « ʙᴀᴄᴋ", callback_data="start")],
+                [_b("ʙᴀᴄᴋ", style="primary", callback_data="start")],
             ]
         return self.ikm(rows)
 
-    def ping_markup(self, text: str) -> types.InlineKeyboardMarkup:
+    def ping_markup(self, text: str) -> ptypes.InlineKeyboardMarkup:
         return self.ikm([
             [
-                self.ikb(text=" 📢 ᴄʜᴀɴɴᴇʟ", url=config.SUPPORT_CHANNEL),
-                self.ikb(text=" 🆘 ꜱᴜᴘᴘᴏʀᴛ", url=config.SUPPORT_CHAT),
+                _b("📢 Channel", style="primary", url=config.SUPPORT_CHANNEL),
+                _b("🍂 Support", style="success", url=config.SUPPORT_CHAT),
             ],
             [
-                self.ikb(
-                    text=" ➕ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ",
-                    url=f"https://t.me/{app.username}?startgroup=true",
-                ),
+                _b("➕ Add Me to Your Group", style="success",
+                   url=f"https://t.me/{app.username}?startgroup=true"),
             ],
         ])
 
     def play_queued(
         self, chat_id: int, item_id: str, _text: str
-    ) -> types.InlineKeyboardMarkup:
+    ) -> ptypes.InlineKeyboardMarkup:
         return self.ikm([
             [
-                self.ikb(text="▷", callback_data=f"controls resume {chat_id}"),
-                self.ikb(text="II", callback_data=f"controls pause {chat_id}"),
-                self.ikb(text="⏭", callback_data=f"controls skip {chat_id}"),
-                self.ikb(text="⏹", callback_data=f"controls stop {chat_id}"),
+                _b("▷",   style="success", callback_data=f"controls resume {chat_id}"),
+                _b("∣ ∣", style="primary", callback_data=f"controls pause {chat_id}"),
+                _b(">>",  style="primary", callback_data=f"controls skip {chat_id}"),
+                _b("▣",   style="danger",  callback_data=f"controls stop {chat_id}"),
             ],
-            [self.ikb(text=" ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}")],
+            [_b("ᴅᴇʟᴇᴛᴇ", style="danger",
+                callback_data=f"controls close {chat_id}")],
         ])
 
     def queue_markup(
         self, chat_id: int, _text: str, playing: bool
-    ) -> types.InlineKeyboardMarkup:
+    ) -> ptypes.InlineKeyboardMarkup:
         _action = "pause" if playing else "resume"
-        return self.ikm(
-            [[self.ikb(text=_text, callback_data=f"controls {_action} {chat_id} q")]]
-        )
+        _style  = "primary" if playing else "success"
+        return self.ikm([[
+            _b(_text, style=_style,
+               callback_data=f"controls {_action} {chat_id} q")
+        ]])
 
     def settings_markup(
         self, lang: dict, admin_only: bool, language: str, chat_id: int
-    ) -> types.InlineKeyboardMarkup:
-        return self.ikm([
-            [
-                self.ikb(
-                    text=" " + lang["play_mode"] + " ➜",
-                    callback_data=f"controls status {chat_id}",
-                ),
-                self.ikb(text=admin_only, callback_data="playmode"),
-            ],
-        ])
+    ) -> ptypes.InlineKeyboardMarkup:
+        return self.ikm([[
+            _b(lang["play_mode"] + " ➜", style="primary",
+               callback_data=f"controls status {chat_id}"),
+            _b(admin_only, style="success", callback_data="playmode"),
+        ]])
 
     def start_key(
         self, lang: dict, private: bool = False
-    ) -> types.InlineKeyboardMarkup:
-        rows = [
-            [
-                self.ikb(
-                    text=" ➕ " + lang["add_me"],
-                    url=f"https://t.me/{app.username}?startgroup=true",
-                )
-            ],
-            [self.ikb(text=" ❓ " + lang["help"], callback_data="help")],
-            [
-                self.ikb(text=" 🆘 " + lang["support"], url=config.SUPPORT_CHAT),
-                self.ikb(text=" 📢 " + lang["channel"], url=config.SUPPORT_CHANNEL),
-            ],
-        ]
-        return self.ikm(rows)
-
-    def yt_key(self, link: str) -> types.InlineKeyboardMarkup:
+    ) -> ptypes.InlineKeyboardMarkup:
         return self.ikm([
+            [_b(lang["add_me"], style="success",
+                url=f"https://t.me/{app.username}?startgroup=true")],
+            [_b(lang["help"], style="primary", callback_data="help")],
             [
-                self.ikb(text=" ᴄᴏᴘʏ ʟɪɴᴋ", copy_text=link),
-                self.ikb(text=" ᴏᴘᴇɴ ɪɴ ʏᴛ", url=link),
+                _b(lang["support"], style="danger",  url=config.SUPPORT_CHAT),
+                _b(lang["channel"], style="success", url=config.SUPPORT_CHANNEL),
             ],
         ])
+
+    def yt_key(self, link: str) -> ptypes.InlineKeyboardMarkup:
+        return self.ikm([[
+            _b("ᴄᴏᴘʏ ʟɪɴᴋ",        style="primary", copy_text=link),
+            _b("ᴏᴘᴇɴ ɪɴ ʏᴏᴜᴛᴜʙᴇ", style="success", url=link),
+        ]])
