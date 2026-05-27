@@ -1,11 +1,9 @@
 import os
 import random
 import time
-
 import aiohttp
 from pyrogram import filters, types
-
-from HasiiMusic import app, config, logger, yt
+from HasiiMusic import app, config, yt
 
 _last_refresh_time: float = 0.0
 
@@ -18,17 +16,14 @@ async def _set_cookies(_, m: types.Message):
     except Exception:
         pass
 
-    # Option 1: File reply
     if m.reply_to_message and m.reply_to_message.document:
         doc = m.reply_to_message.document
         if not doc.file_name or not doc.file_name.endswith(".txt"):
-            return await m.reply_text(
-                "<blockquote><b>❌ Galat File</b></blockquote>\n\n"
-                "<blockquote>Sirf <b>.txt</b> file reply karo.</blockquote>"
-            )
+            return await m.reply_text("<blockquote><b>❌ Sirf .txt file reply karo.</b></blockquote>")
         sent = await m.reply_text("<blockquote><b>⏳ Saving...</b></blockquote>")
         try:
-            path = f"HasiiMusic/cookies/cookie{random.randint(10000, 99999)}.txt"
+            os.makedirs("HasiiMusic/cookies", exist_ok=True)
+            path = f"HasiiMusic/cookies/cookie{random.randint(10000,99999)}.txt"
             await m.reply_to_message.download(file_name=path)
             size = os.path.getsize(path)
             if size < 50:
@@ -42,35 +37,29 @@ async def _set_cookies(_, m: types.Message):
             yt.cookies_expired = False
             yt.last_cookie_alert = 0.0
             _last_refresh_time = time.time()
-            await sent.edit_text(
-                f"<blockquote><b>✅ Cookies Saved!</b></blockquote>\n\n"
+            return await sent.edit_text(
+                f"<blockquote><b>✅ Saved!</b></blockquote>\n\n"
                 f"<blockquote>File: <code>{name}</code>\n"
                 f"Size: <b>{size} bytes</b>\n"
-                f"Total: <b>{len(yt.cookies)}</b> file(s)\n"
-                f"Status: <b>✅ Active</b></blockquote>"
+                f"Total: <b>{len(yt.cookies)}</b></blockquote>"
             )
         except Exception as e:
-            await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
-        return
+            return await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
 
-    # Option 2: URL
     if len(m.command) >= 2:
         url = m.command[1].strip()
         if not url.startswith("http"):
-            return await m.reply_text(
-                "<blockquote><b>❌ Invalid URL</b></blockquote>\n\n"
-                "<blockquote>HTTP/HTTPS link do ya .txt file reply karo.</blockquote>"
-            )
+            return await m.reply_text("<blockquote><b>❌ Valid HTTP URL do.</b></blockquote>")
         sent = await m.reply_text("<blockquote><b>⏳ Downloading...</b></blockquote>")
         try:
-            path = f"HasiiMusic/cookies/cookie{random.randint(10000, 99999)}.txt"
-            link = url.replace("batbin.me/", "batbin.me/raw/") if "batbin.me" in url and "/raw/" not in url else url
+            os.makedirs("HasiiMusic/cookies", exist_ok=True)
+            path = f"HasiiMusic/cookies/cookie{random.randint(10000,99999)}.txt"
+            link = url.replace("batbin.me/", "batbin.me/raw/") \
+                if ("batbin.me" in url and "/raw/" not in url) else url
             async with aiohttp.ClientSession() as session:
                 async with session.get(link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status != 200:
-                        return await sent.edit_text(
-                            f"<blockquote><b>❌ HTTP {resp.status}</b>\nURL check karo.</blockquote>"
-                        )
+                        return await sent.edit_text(f"<blockquote><b>❌ HTTP {resp.status}</b></blockquote>")
                     content = await resp.read()
                     if len(content) < 50:
                         return await sent.edit_text("<blockquote><b>❌ File empty/invalid</b></blockquote>")
@@ -84,21 +73,19 @@ async def _set_cookies(_, m: types.Message):
             yt.cookies_expired = False
             yt.last_cookie_alert = 0.0
             _last_refresh_time = time.time()
-            await sent.edit_text(
-                f"<blockquote><b>✅ Cookies Downloaded!</b></blockquote>\n\n"
+            return await sent.edit_text(
+                f"<blockquote><b>✅ Downloaded!</b></blockquote>\n\n"
                 f"<blockquote>File: <code>{name}</code>\n"
                 f"Size: <b>{len(content)} bytes</b>\n"
-                f"Total: <b>{len(yt.cookies)}</b> file(s)\n"
-                f"Status: <b>✅ Active</b></blockquote>"
+                f"Total: <b>{len(yt.cookies)}</b></blockquote>"
             )
         except Exception as e:
-            await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
-        return
+            return await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
 
     await m.reply_text(
         "<blockquote><b>📋 Usage</b></blockquote>\n\n"
         "<blockquote><b>URL se:</b>\n<code>/setcookies https://files.catbox.moe/abc.txt</code>\n\n"
-        "<b>File se:</b>\ncookies.txt reply karke <code>/setcookies</code></blockquote>"
+        "<b>File se:</b>\ncookies.txt reply karo phir <code>/setcookies</code></blockquote>"
     )
 
 
@@ -111,10 +98,10 @@ async def _refresh_cookies(_, m: types.Message):
         pass
     if not config.COOKIES_URL:
         return await m.reply_text(
-            "<blockquote><b>❌ COOKIE_URL Set Nahi</b></blockquote>\n\n"
-            "<blockquote>Pehle <code>/setcookies &lt;url&gt;</code> use karo.</blockquote>"
+            "<blockquote><b>❌ COOKIE_URL set nahi.\n"
+            "Pehle /setcookies &lt;url&gt; use karo.</b></blockquote>"
         )
-    sent = await m.reply_text("<blockquote><b>⏳ Refreshing cookies...</b></blockquote>")
+    sent = await m.reply_text("<blockquote><b>⏳ Refreshing...</b></blockquote>")
     try:
         deleted = 0
         for f in os.listdir("HasiiMusic/cookies"):
@@ -130,15 +117,13 @@ async def _refresh_cookies(_, m: types.Message):
         _last_refresh_time = time.time()
         if yt.cookies:
             await sent.edit_text(
-                f"<blockquote><b>✅ Cookies Refreshed!</b></blockquote>\n\n"
-                f"<blockquote>Deleted: <b>{deleted}</b> old\n"
-                f"Loaded: <b>{len(yt.cookies)}</b> new\n"
-                f"Status: <b>✅ Active</b></blockquote>"
+                f"<blockquote><b>✅ Refreshed!</b></blockquote>\n\n"
+                f"<blockquote>Deleted: <b>{deleted}</b>\n"
+                f"Loaded: <b>{len(yt.cookies)}</b></blockquote>"
             )
         else:
             await sent.edit_text(
-                "<blockquote><b>❌ Refresh Failed</b></blockquote>\n\n"
-                "<blockquote>Cookies load nahi huin. URL check karo.</blockquote>"
+                "<blockquote><b>❌ Failed — Invidious fallback active.</b></blockquote>"
             )
     except Exception as e:
         await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
@@ -160,8 +145,8 @@ async def _del_cookies(_, m: types.Message):
         yt.checked = False
         yt.warned = False
         await m.reply_text(
-            f"<blockquote><b>🗑️ Deleted</b></blockquote>\n\n"
-            f"<blockquote><b>{deleted}</b> cookie file(s) removed.</blockquote>"
+            f"<blockquote><b>🗑️ {deleted} file(s) deleted.\n"
+            f"Invidious fallback active.</b></blockquote>"
         )
     except Exception as e:
         await m.reply_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
@@ -176,43 +161,58 @@ async def _check_cookies(_, m: types.Message):
     try:
         files = [f for f in os.listdir("HasiiMusic/cookies") if f.endswith(".txt")]
         now = time.time()
-
         if _last_refresh_time > 0:
             mins = int((now - _last_refresh_time) / 60)
             ago = f"{mins}m ago" if mins < 60 else f"{mins//60}h {mins%60}m ago"
-            secs_left = (12 * 3600) - (now - _last_refresh_time)
-            if secs_left > 0:
-                nh, nm = int(secs_left // 3600), int((secs_left % 3600) // 60)
-                next_str = f"in {nh}h {nm}m"
-            else:
-                next_str = "overdue"
+            sl = (12 * 3600) - (now - _last_refresh_time)
+            next_str = f"in {int(sl//3600)}h {int((sl%3600)//60)}m" if sl > 0 else "overdue"
         else:
-            ago = "Never"
-            next_str = "after first refresh"
-
+            ago, next_str = "Never", "after first /refreshcookies"
         status = "❌ Expired" if yt.cookies_expired else ("✅ Active" if files else "⚠️ None")
-        url_status = "✅ Set" if config.COOKIES_URL else "❌ Not set"
-
-        file_list = ""
-        for f in files:
-            size = os.path.getsize(f"HasiiMusic/cookies/{f}")
-            file_list += f"• <code>{f}</code> — {size} bytes\n"
-
+        inv = "✅ Active" if (not files or yt.cookies_expired) else "⏸ Standby"
+        file_list = "".join(
+            f"• <code>{f}</code> — {os.path.getsize(f'HasiiMusic/cookies/{f}')} bytes\n"
+            for f in files
+        ) or "⚠️ No cookie files\n"
         await m.reply_text(
             f"<blockquote><b>🍪 Cookie Status</b></blockquote>\n\n"
-            f"<blockquote>"
-            f"Status: <b>{status}</b>\n"
+            f"<blockquote>Status: <b>{status}</b>\n"
             f"Files: <b>{len(files)}</b>\n"
-            f"COOKIE_URL: <b>{url_status}</b>\n"
+            f"COOKIE_URL: <b>{'✅' if config.COOKIES_URL else '❌ Not set'}</b>\n"
             f"Last refresh: <b>{ago}</b>\n"
-            f"Next auto-refresh: <b>{next_str}</b>\n\n"
-            f"{file_list if file_list else '⚠️ No cookie files found'}"
-            f"</blockquote>\n\n"
-            f"<blockquote>"
-            f"/refreshcookies — Abhi refresh karo\n"
-            f"/setcookies &lt;url&gt; — Nayi cookies set karo\n"
-            f"/delcookies — Saari delete karo"
-            f"</blockquote>"
+            f"Next auto: <b>{next_str}</b>\n"
+            f"Invidious: <b>{inv}</b>\n\n"
+            f"{file_list}</blockquote>\n"
+            f"<blockquote>/refreshcookies | /setcookies &lt;url&gt; | /delcookies | /testplay</blockquote>"
         )
     except Exception as e:
         await m.reply_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
+
+
+@app.on_message(filters.command(["testplay"]) & app.sudo_filter)
+async def _test_play(_, m: types.Message):
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    sent = await m.reply_text("<blockquote><b>⏳ Testing YouTube...</b></blockquote>")
+    try:
+        import time as t
+        start = t.time()
+        result = await yt.download("dQw4w9WgXcQ", is_live=False, video=False)
+        elapsed = round(t.time() - start, 1)
+        if result:
+            method = "Invidious (URL)" if result.startswith("http") else "yt-dlp (File)"
+            await sent.edit_text(
+                f"<blockquote><b>✅ Test Passed!</b></blockquote>\n\n"
+                f"<blockquote>Method: <b>{method}</b>\n"
+                f"Time: <b>{elapsed}s</b>\n"
+                f"Cookies: <b>{len(yt.cookies)}</b></blockquote>"
+            )
+        else:
+            await sent.edit_text(
+                f"<blockquote><b>❌ Test Failed!</b></blockquote>\n\n"
+                f"<blockquote>Sab methods fail.\nTime: <b>{elapsed}s</b></blockquote>"
+            )
+    except Exception as e:
+        await sent.edit_text(f"<blockquote><b>❌ Error: {e}</b></blockquote>")
