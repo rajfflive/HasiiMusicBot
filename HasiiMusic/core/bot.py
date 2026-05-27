@@ -39,23 +39,30 @@ class Bot(pyrogram.Client):
 
     def __init__(self):
         """Initialize the bot client with configuration settings."""
-        super().__init__(
-            name="HasiiMusic",
-            api_id=config.API_ID,
-            api_hash=config.API_HASH,
-            bot_token=config.BOT_TOKEN,
-            parse_mode=pyrogram.enums.ParseMode.HTML,
-            max_concurrent_transmissions=7,
-            link_preview_options=pyrogram.types.LinkPreviewOptions(
-                is_disabled=True),
-        )
+        # Base arguments for Pyrogram client
+        kwargs = {
+            "name": "HasiiMusic",
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH,
+            "bot_token": config.BOT_TOKEN,
+            "parse_mode": pyrogram.enums.ParseMode.HTML,
+            "max_concurrent_transmissions": 7,
+        }
+
+        # ✅ FIX: Version independent link preview handling
+        if hasattr(pyrogram.types, "LinkPreviewOptions"):
+            kwargs["link_preview_options"] = pyrogram.types.LinkPreviewOptions(is_disabled=True)
+        else:
+            # For Pyrogram 1.x, use the old parameter
+            kwargs["disable_web_page_preview"] = True
+
+        super().__init__(**kwargs)
 
         self.owner: int = config.OWNER_ID
         self.logger: int = config.LOGGER_ID
         self.bl_users: pyrogram.filters.Filter = pyrogram.filters.user()
         self.sudoers: set = {self.owner}  # Set of sudo user IDs
-        self.sudo_filter: pyrogram.filters.Filter = pyrogram.filters.user(
-            self.owner)
+        self.sudo_filter: pyrogram.filters.Filter = pyrogram.filters.user(self.owner)
 
         # These will be set after boot()
         self.id: Optional[int] = None
