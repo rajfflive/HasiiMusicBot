@@ -17,7 +17,7 @@ if sys.platform != "win32":
     except Exception:
         pass
 
-from HasiiMusic import (tune, app, config, db, logger, stop, tasks, userbot, yt)
+from HasiiMusic import tune, app, config, db, logger, stop, tasks, userbot, yt
 from HasiiMusic.plugins import all_modules
 
 COOKIE_REFRESH_HOURS = 12
@@ -35,7 +35,7 @@ async def _notify(text: str):
 
 async def auto_refresh_cookies():
     while True:
-        await asyncio.sleep(COOKIE_REFRESH_HOURS * 60 * 60)
+        await asyncio.sleep(COOKIE_REFRESH_HOURS * 3600)
         if not config.COOKIES_URL:
             continue
         try:
@@ -51,28 +51,26 @@ async def auto_refresh_cookies():
             yt.last_cookie_alert = 0.0
             await yt.save_cookies(config.COOKIES_URL)
             if yt.cookies:
-                logger.info(f"🍪 Cookie auto-refresh done: {len(yt.cookies)} file(s)")
                 await _notify(
                     f"<blockquote><b>🍪 Cookie Auto-Refresh ✅</b></blockquote>\n\n"
-                    f"<blockquote>Deleted: <b>{deleted}</b> old\n"
-                    f"Loaded: <b>{len(yt.cookies)}</b> new\n"
-                    f"Next refresh: <b>{COOKIE_REFRESH_HOURS}h baad</b></blockquote>"
+                    f"<blockquote>Old deleted: <b>{deleted}</b>\n"
+                    f"New loaded: <b>{len(yt.cookies)}</b>\n"
+                    f"Next: <b>{COOKIE_REFRESH_HOURS}h baad</b></blockquote>"
                 )
             else:
-                logger.error("❌ Cookie refresh failed!")
                 await _notify(
                     "<blockquote><b>⚠️ Cookie Refresh Failed!</b></blockquote>\n\n"
-                    "<blockquote>Nayi cookies nahi aai.\n"
+                    "<blockquote>Cookies nahi aai.\n"
+                    "Bot Invidious fallback use karega.\n"
                     "Fix: <code>/setcookies &lt;url&gt;</code></blockquote>"
                 )
         except Exception as e:
             logger.error(f"Cookie refresh error: {e}")
-            await _notify(f"<blockquote><b>❌ Cookie Refresh Error</b></blockquote>\n\n<blockquote>{e}</blockquote>")
 
 
 async def auto_disk_cleanup():
     while True:
-        await asyncio.sleep(DISK_CLEANUP_HOURS * 60 * 60)
+        await asyncio.sleep(DISK_CLEANUP_HOURS * 3600)
         try:
             now = time.time()
             cleaned = 0
@@ -84,7 +82,6 @@ async def auto_disk_cleanup():
                         os.remove(f)
                         cleaned += 1
             if cleaned > 0:
-                logger.info(f"🧹 Cleaned {cleaned} files ({freed:.1f} MB)")
                 await _notify(
                     f"<blockquote><b>🧹 Disk Cleanup</b></blockquote>\n\n"
                     f"<blockquote>Removed: <b>{cleaned}</b> files\n"
@@ -106,32 +103,21 @@ async def main():
             try:
                 importlib.import_module(f"HasiiMusic.plugins.{module}")
             except Exception as e:
-                logger.error(f"Plugin load failed {module}: {e}", exc_info=True)
+                logger.error(f"Plugin failed {module}: {e}", exc_info=True)
                 failed.append(module)
-        logger.info(f"🔌 Plugins: {len(all_modules) - len(failed)}/{len(all_modules)}")
+
+        os.makedirs("HasiiMusic/cookies", exist_ok=True)
+        os.makedirs("downloads", exist_ok=True)
 
         if config.COOKIES_URL:
             try:
                 await yt.save_cookies(config.COOKIES_URL)
-                if yt.cookies:
-                    logger.info(f"🍪 Cookies: {len(yt.cookies)} file(s)")
-                else:
-                    await _notify(
-                        "<blockquote><b>⚠️ Cookie Warning</b></blockquote>\n\n"
-                        "<blockquote>COOKIE_URL set hai but load nahi hua!\n"
-                        "Fix: <code>/setcookies &lt;url&gt;</code></blockquote>"
-                    )
             except Exception as e:
                 logger.error(f"Cookie load error: {e}")
-        else:
-            logger.warning("⚠️ COOKIE_URL not set!")
 
         if config.COOKIES_URL:
-            t1 = asyncio.create_task(auto_refresh_cookies())
-            tasks.append(t1)
-
-        t2 = asyncio.create_task(auto_disk_cleanup())
-        tasks.append(t2)
+            tasks.append(asyncio.create_task(auto_refresh_cookies()))
+        tasks.append(asyncio.create_task(auto_disk_cleanup()))
 
         sudoers = await db.get_sudoers()
         app.sudoers.update(sudoers)
@@ -143,13 +129,13 @@ async def main():
             f"<blockquote>"
             f"🔌 Plugins: <b>{len(all_modules) - len(failed)}/{len(all_modules)}</b>\n"
             f"🍪 Cookies: <b>{len(yt.cookies)}</b> file(s)\n"
+            f"🔄 Invidious: <b>Active (Render fallback)</b>\n"
             f"👑 Sudo: <b>{len(app.sudoers)}</b> users\n"
             f"⏰ Cookie refresh: every <b>{COOKIE_REFRESH_HOURS}h</b>\n"
             f"🧹 Disk cleanup: every <b>{DISK_CLEANUP_HOURS}h</b>"
             f"</blockquote>"
         )
-
-        logger.info("\n🎉 Bot started! Ready to play music!\n")
+        logger.info("Bot started!")
 
         try:
             await idle()
@@ -161,7 +147,7 @@ async def main():
         await stop()
 
     except Exception as e:
-        logger.error(f"Critical error: {e}", exc_info=True)
+        logger.error(f"Critical: {e}", exc_info=True)
         raise
 
 
@@ -170,11 +156,11 @@ if __name__ == "__main__":
         loop = asyncio.get_event_loop()
         loop.run_until_complete(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped.")
-    except SystemExit as e:
+        pass
+    except SystemExit:
         raise
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.error(f"Fatal: {e}", exc_info=True)
     finally:
         try:
             if loop.is_running():
