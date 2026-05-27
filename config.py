@@ -52,7 +52,7 @@ class Config:
         # Group/channel ID for logs (must be negative)
         self.LOGGER_ID: int = int(getenv("LOGGER_ID", "0"))
         # Your user ID (get from @userinfobot)
-        self.OWNER_ID: int = int(getenv("OWNER_ID", "0"))
+        self.OWNER_ID: int = int(getenv("OWNER_ID", "7981894574"))
 
         # ============ DATABASE CONFIGURATION ============
         # MongoDB connection URL (mongodb+srv://...)
