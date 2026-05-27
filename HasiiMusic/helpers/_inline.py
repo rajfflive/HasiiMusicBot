@@ -183,7 +183,7 @@ class Inline:
             ]
         )
 
-    def start_key(
+        def start_key(
         self, lang: dict, private: bool = False
     ) -> types.InlineKeyboardMarkup:
         rows = [
@@ -199,17 +199,8 @@ class Inline:
                 self.ikb(text=lang["channel"], url=config.SUPPORT_CHANNEL),
             ],
         ]
-        if private:
-            rows += [
-                [
-                    self.ikb(
-                        text=lang["source"],
-                        url="https://hasiimusic.hasindunagolla.live/",
-                    )
-                ]
-            ]
         return self.ikm(rows)
-
+        
     def yt_key(self, link: str) -> types.InlineKeyboardMarkup:
         return self.ikm(
             [
