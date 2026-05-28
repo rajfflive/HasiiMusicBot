@@ -7,6 +7,8 @@ from HasiiMusic import app, db
 
 _afk_cache: dict[int, bool] = {}
 
+# ─── AFK GIF IDs — replace any expired IDs with new animation file_ids ──────
+# To get a new file_id: send the GIF to your bot and forward it to @RawDataBot
 AFK_GIFS: list[str] = [
     "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",
     "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",
