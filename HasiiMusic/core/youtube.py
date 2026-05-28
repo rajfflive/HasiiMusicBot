@@ -284,44 +284,48 @@ class YouTube:
         # ── Live stream ───────────────────────────────────────────────────────
         if is_live:
             cookie = self.get_cookies()
-            ydl_opts: dict = {
+            base_live_opts: dict = {
                 "quiet": True,
                 "no_warnings": True,
                 "format": "bestaudio/best",
                 "noplaylist": True,
-                "socket_timeout": 20,
+                "socket_timeout": 30,
                 "check_formats": False,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["tv_embedded", "web_creator", "android", "web"],
-                        "player_skip": ["webpage", "configs"],
-                    }
-                },
             }
             if cookie:
-                ydl_opts["cookiefile"] = cookie
+                base_live_opts["cookiefile"] = cookie
 
             def _extract_url():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try:
-                        info = ydl.extract_info(url, download=False)
-                        if not info:
-                            return None
-                        direct = info.get("url")
-                        if direct:
-                            return direct
-                        for fmt in info.get("formats", []):
-                            if fmt.get("acodec") != "none" and fmt.get("url"):
-                                return fmt["url"]
-                        return info.get("manifest_url")
-                    except Exception as ex:
-                        logger.error("Live stream extraction failed: %s", ex)
-                        return None
+                for client in [["tv_embedded"], ["android", "ios"], ["web"]]:
+                    opts = {**base_live_opts, "extractor_args": {"youtube": {"player_client": client}}}
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        try:
+                            info = ydl.extract_info(url, download=False)
+                            if not info:
+                                continue
+                            formats = info.get("formats", [])
+                            if not formats:
+                                logger.warning(f"⚠️ No formats from {client}, trying next...")
+                                continue
+                            direct = info.get("url")
+                            if direct:
+                                return direct
+                            for fmt in formats:
+                                if fmt.get("acodec") != "none" and fmt.get("url"):
+                                    return fmt["url"]
+                            manifest = info.get("manifest_url")
+                            if manifest:
+                                return manifest
+                        except Exception as ex:
+                            logger.warning(f"⚠️ Live client {client} failed: {ex}")
+                            continue
+                logger.error(f"❌ All live stream clients failed for {video_id}")
+                return None
 
             try:
-                return await asyncio.wait_for(asyncio.to_thread(_extract_url), timeout=35)
+                return await asyncio.wait_for(asyncio.to_thread(_extract_url), timeout=45)
             except asyncio.TimeoutError:
                 logger.error("Live stream URL extraction timed out for %s", video_id)
                 return None
@@ -371,8 +375,7 @@ class YouTube:
                 "sleep_interval_requests": 1,
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["tv_embedded", "web_creator", "android", "web"],
-                        "player_skip": ["webpage", "configs"],
+                        "player_client": ["android_music", "android", "ios", "tv_embedded"],
                     }
                 },
             }
@@ -411,39 +414,67 @@ class YouTube:
                     located = self._locate_download_file(video_id, video=video)
                     if located:
                         return located
-                    logger.error(f"❌ Download completed but file not found for: {video_id}")
+                    logger.error(f"❌ Download completed but file not found: {video_id}")
                     return None
 
                 except (yt_dlp.utils.ExtractorError, yt_dlp.utils.DownloadError) as ex:
-                    error_msg = str(ex)
+                    error_msg = str(ex).lower()
 
-                    if "sign in" in error_msg.lower() or "requested format" in error_msg.lower() or "format" in error_msg.lower():
-                        logger.warning(f"⚠️ Attempt 2 for {video_id}: android_music client, no webpage skip...")
+                    # Attempt 2: web client + cookies
+                    if any(k in error_msg for k in ["sign in", "requested format", "no video formats", "format"]):
+                        logger.warning(f"⚠️ Attempt 2 for {video_id}: web client + cookies...")
                         try:
                             if ydl_instance:
                                 ydl_instance.close()
                                 ydl_instance = None
                             retry_opts = {
                                 **opts,
-                                "format": "best",
+                                "format": "bestaudio/best",
                                 "check_formats": False,
                                 "extractor_args": {
                                     "youtube": {
-                                        "player_client": ["android_music", "android", "ios"],
+                                        "player_client": ["web", "web_creator", "tv_embedded"],
                                     }
                                 },
                             }
-                            retry_opts.pop("cookiefile", None)
+                            if cookie:
+                                retry_opts["cookiefile"] = cookie
                             ydl_instance = yt_dlp.YoutubeDL(retry_opts)
                             info = ydl_instance.extract_info(url, download=True)
                             if info:
                                 time.sleep(0.5)
                                 located = self._locate_download_file(video_id, video=video)
                                 if located:
-                                    logger.info(f"✅ Retry succeeded for {video_id}")
+                                    logger.info(f"✅ Attempt 2 succeeded for {video_id}")
                                     return located
-                        except Exception as retry_ex:
-                            logger.error(f"❌ Retry also failed for {video_id}: {retry_ex}")
+                        except Exception:
+                            # Attempt 3: last resort ios/android no cookies
+                            logger.warning(f"⚠️ Attempt 3 for {video_id}: last resort...")
+                            try:
+                                if ydl_instance:
+                                    ydl_instance.close()
+                                    ydl_instance = None
+                                last_opts = {
+                                    **opts,
+                                    "format": "best",
+                                    "check_formats": False,
+                                    "extractor_args": {
+                                        "youtube": {
+                                            "player_client": ["ios", "android"],
+                                        }
+                                    },
+                                }
+                                last_opts.pop("cookiefile", None)
+                                ydl_instance = yt_dlp.YoutubeDL(last_opts)
+                                info = ydl_instance.extract_info(url, download=True)
+                                if info:
+                                    time.sleep(0.5)
+                                    located = self._locate_download_file(video_id, video=video)
+                                    if located:
+                                        logger.info(f"✅ Attempt 3 succeeded for {video_id}")
+                                        return located
+                            except Exception as last_ex:
+                                logger.error(f"❌ All 3 attempts failed for {video_id}: {last_ex}")
 
                     recovered = self._locate_download_file(video_id, video=video)
                     if recovered:
@@ -453,7 +484,7 @@ class YouTube:
                     return None
 
                 except Exception as ex:
-                    logger.warning(f"⚠️ Unexpected download error for {video_id}: {ex}")
+                    logger.warning(f"⚠️ Unexpected error for {video_id}: {ex}")
                     return None
                 finally:
                     if ydl_instance:
