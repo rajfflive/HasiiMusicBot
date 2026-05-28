@@ -2,13 +2,12 @@ import random
 import time
 
 from pyrogram import filters, types
-
 from HasiiMusic import app, db
 
 
-_afk_cache: dict[int, dict] = {}
+_afk_cache: dict[int, bool] = {}
 
-AFK_GIFS = [
+AFK_GIFS: list[str] = [
     "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",
     "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",
     "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",
@@ -53,7 +52,6 @@ def _fmt_time(seconds: float) -> str:
         return f"{h}h {m}m"
 
 
-# ─── /afk works in BOTH private and group ─────────────────────────────────────
 @app.on_message(filters.command("afk") & (filters.private | filters.group))
 async def afk_cmd(_, message: types.Message):
     if not message.from_user:
@@ -68,7 +66,6 @@ async def afk_cmd(_, message: types.Message):
     except Exception:
         pass
 
-    # Toggle off if already AFK
     if await _is_afk(user.id):
         await _del_afk(user.id)
         await app.send_message(
@@ -84,20 +81,20 @@ async def afk_cmd(_, message: types.Message):
         caption += f"\n📝 ʀᴇᴀꜱᴏɴ: {reason}"
     caption += "</blockquote>"
 
-    sent = False
-    for gif_id in random.sample(AFK_GIFS, len(AFK_GIFS)):
-        try:
-            await app.send_animation(chat_id, animation=gif_id, caption=caption)
-            sent = True
-            break
-        except Exception:
-            continue
+    gif_sent = False
+    if AFK_GIFS:
+        for gif_id in random.sample(AFK_GIFS, len(AFK_GIFS)):
+            try:
+                await app.send_animation(chat_id, gif_id, caption=caption)
+                gif_sent = True
+                break
+            except Exception:
+                continue
 
-    if not sent:
+    if not gif_sent:
         await app.send_message(chat_id, caption)
 
 
-# ─── Auto-remove AFK when user sends a message (group only) ───────────────────
 @app.on_message(filters.group & ~filters.service, group=10)
 async def afk_watcher(_, message: types.Message):
     if not message.from_user:
