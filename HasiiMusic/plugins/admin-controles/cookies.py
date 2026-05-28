@@ -1,10 +1,16 @@
+# ==============================================================================
+# cookies.py - YouTube Cookie Management
+# Commands: /scook (set), /ccook (check), /dcook (delete)
+# ==============================================================================
+
 import os
+import glob
+import datetime
 
 from pyrogram import filters, types
+from HasiiMusic import app, config, yt
 
-from HasiiMusic import app, config
-
-COOKIES_PATH = "HasiiMusic/cookies/cookies.txt"
+COOKIES_DIR = "HasiiMusic/cookies"
 OWNER_ID = int(getattr(config, "OWNER_ID", 0))
 
 
@@ -12,106 +18,200 @@ def _is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
 
 
-@app.on_message(filters.command("setcookies") & filters.private)
+def _all_cookie_files() -> list[str]:
+    return sorted(glob.glob(f"{COOKIES_DIR}/*.txt"))
+
+
+def _reload_yt_cookies():
+    """youtube instance ko naye cookies se update karo."""
+    try:
+        yt.cookies = []
+        yt.checked = False
+        yt.warned = False
+        for f in os.listdir(COOKIES_DIR):
+            if f.endswith(".txt"):
+                yt.cookies.append(f)
+        yt.checked = True
+    except Exception:
+        pass
+
+
+# ── /scook — Set/Upload cookies ──────────────────────────────────────────────
+
+@app.on_message(filters.command(["scook", "setcookies"]) & filters.private)
 async def set_cookies_cmd(_, message: types.Message):
     if not message.from_user or not _is_owner(message.from_user.id):
-        return await message.reply_text(
-            "<blockquote>❌ ᴏᴡɴᴇʀ ᴏɴʟʏ ᴄᴏᴍᴍᴀɴᴅ.</blockquote>"
-        )
+        return await message.reply_text("<blockquote>❌ Owner only command.</blockquote>")
 
     doc = message.document or (
-        message.reply_to_message.document
-        if message.reply_to_message
-        else None
+        message.reply_to_message.document if message.reply_to_message else None
     )
 
     if not doc:
+        files = _all_cookie_files()
+        count = len(files)
         return await message.reply_text(
-            "<blockquote>📄 ᴘʟᴇᴀꜱᴇ ꜱᴇɴᴅ <code>cookies.txt</code> ꜰɪʟᴇ ᴡɪᴛʜ /ꜱᴇᴛᴄᴏᴏᴋɪᴇꜱ\n\n"
-            "ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴛʜᴇ ᴄᴏᴏᴋɪᴇꜱ ꜰɪʟᴇ ᴡɪᴛʜ /ꜱᴇᴛᴄᴏᴏᴋɪᴇꜱ</blockquote>"
+            "<blockquote><b>🍪 Set Cookies</b>\n\n"
+            "Reply to a <code>cookies.txt</code> file with /scook\n"
+            "or send the file with /scook caption.\n\n"
+            f"📂 Current cookie files: <b>{count}</b>\n"
+            "Use /ccook to check status.</blockquote>"
         )
 
-    status = await message.reply_text("<blockquote>⏳ ᴜᴘʟᴏᴀᴅɪɴɢ ᴄᴏᴏᴋɪᴇꜱ...</blockquote>")
-    try:
-        os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
-        await app.download_media(doc, file_name=COOKIES_PATH)
-        size = os.path.getsize(COOKIES_PATH)
-        await status.edit_text(
-            f"<blockquote>✅ ᴄᴏᴏᴋɪᴇꜱ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!\n\n"
-            f"📁 ᴘᴀᴛʜ: <code>{COOKIES_PATH}</code>\n"
-            f"📦 ꜱɪᴢᴇ: {size} ʙʏᴛᴇꜱ\n\n"
-            f"ᴜꜱᴇ /ᴄʜᴇᴄᴋᴄᴏᴏᴋɪᴇꜱ ᴛᴏ ᴠᴇʀɪꜰʏ.</blockquote>"
-        )
-    except Exception as e:
-        await status.edit_text(
-            f"<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ꜱᴀᴠᴇ ᴄᴏᴏᴋɪᴇꜱ:\n{e}</blockquote>"
-        )
-
-
-@app.on_message(filters.command("checkcookies"))
-async def check_cookies_cmd(_, message: types.Message):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return await message.reply_text(
-            "<blockquote>❌ ᴏᴡɴᴇʀ ᴏɴʟʏ ᴄᴏᴍᴍᴀɴᴅ.</blockquote>"
-        )
-
-    if not os.path.exists(COOKIES_PATH):
-        return await message.reply_text(
-            "<blockquote>⚠️ ɴᴏ ᴄᴏᴏᴋɪᴇꜱ ꜰɪʟᴇ ꜰᴏᴜɴᴅ.\n\n"
-            "ᴜꜱᴇ /ꜱᴇᴛᴄᴏᴏᴋɪᴇꜱ ᴛᴏ ᴜᴘʟᴏᴀᴅ ᴏɴᴇ.</blockquote>"
-        )
+    os.makedirs(COOKIES_DIR, exist_ok=True)
+    status = await message.reply_text("<blockquote>⏳ Saving cookies...</blockquote>")
 
     try:
-        size = os.path.getsize(COOKIES_PATH)
-        mtime = os.path.getmtime(COOKIES_PATH)
+        # Unique filename — overwrite nahi hoga purana
+        import random
+        fname = f"cookie{random.randint(10000, 99999)}.txt"
+        fpath = f"{COOKIES_DIR}/{fname}"
 
-        with open(COOKIES_PATH, "r", errors="ignore") as f:
+        await app.download_media(doc, file_name=fpath)
+
+        if not os.path.exists(fpath) or os.path.getsize(fpath) < 50:
+            os.remove(fpath)
+            return await status.edit_text(
+                "<blockquote>❌ Invalid cookie file. File too small or empty.</blockquote>"
+            )
+
+        # Validate cookie format
+        with open(fpath, "r", errors="ignore") as f:
             content = f.read()
 
         lines = [l for l in content.splitlines() if l.strip() and not l.startswith("#")]
-        domains = set()
-        for line in lines:
-            parts = line.split("\t")
-            if len(parts) >= 6:
-                domains.add(parts[0].lstrip("."))
+        yt_found = any("youtube" in l or "google" in l for l in lines)
+        size = os.path.getsize(fpath)
 
-        import datetime
-        modified = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        _reload_yt_cookies()
+        total = len(_all_cookie_files())
 
-        yt_ok = any("youtube" in d or "google" in d for d in domains)
-        status_icon = "✅" if yt_ok else "⚠️"
-        yt_status = "ᴘʀᴇꜱᴇɴᴛ" if yt_ok else "ɴᴏᴛ ꜰᴏᴜɴᴅ"
+        yt_icon = "✅" if yt_found else "⚠️"
+        yt_text = "YouTube cookies found" if yt_found else "YouTube cookies NOT found — might not work"
 
-        domain_list = "\n".join(f"  • {d}" for d in sorted(domains)[:10])
-        if len(domains) > 10:
-            domain_list += f"\n  ... +{len(domains) - 10} ᴍᴏʀᴇ"
-
-        await message.reply_text(
-            f"<blockquote><b>🍪 ᴄᴏᴏᴋɪᴇꜱ ꜱᴛᴀᴛᴜꜱ</b>\n\n"
-            f"{status_icon} ʏᴏᴜᴛᴜʙᴇ ᴄᴏᴏᴋɪᴇꜱ: {yt_status}\n"
-            f"📁 ꜰɪʟᴇ ꜱɪᴢᴇ: {size:,} ʙʏᴛᴇꜱ\n"
-            f"🕐 ʟᴀꜱᴛ ᴜᴘᴅᴀᴛᴇᴅ: {modified}\n"
-            f"📊 ᴛᴏᴛᴀʟ ᴇɴᴛʀɪᴇꜱ: {len(lines)}\n"
-            f"🌐 ᴅᴏᴍᴀɪɴꜱ:\n{domain_list}</blockquote>"
+        await status.edit_text(
+            f"<blockquote>✅ <b>Cookies Saved!</b>\n\n"
+            f"📁 File: <code>{fname}</code>\n"
+            f"📦 Size: {size:,} bytes\n"
+            f"📊 Cookie entries: {len(lines)}\n"
+            f"{yt_icon} {yt_text}\n\n"
+            f"📂 Total cookie files: <b>{total}</b>\n"
+            f"Bot is now using the new cookies.</blockquote>"
         )
+
     except Exception as e:
-        await message.reply_text(
-            f"<blockquote>❌ ᴇʀʀᴏʀ ʀᴇᴀᴅɪɴɢ ᴄᴏᴏᴋɪᴇꜱ:\n{e}</blockquote>"
+        await status.edit_text(f"<blockquote>❌ Failed to save cookies:\n<code>{e}</code></blockquote>")
+
+
+# ── /ccook — Check cookies ────────────────────────────────────────────────────
+
+@app.on_message(filters.command(["ccook", "checkcookies"]))
+async def check_cookies_cmd(_, message: types.Message):
+    if not message.from_user or not _is_owner(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner only command.</blockquote>")
+
+    files = _all_cookie_files()
+
+    if not files:
+        return await message.reply_text(
+            "<blockquote>⚠️ <b>No cookie files found!</b>\n\n"
+            "Use /scook to upload a cookies.txt file.\n\n"
+            "Without cookies, YouTube downloads may fail.</blockquote>"
         )
 
+    # Check each file
+    file_details = []
+    total_entries = 0
+    all_yt_ok = True
 
-@app.on_message(filters.command("delcookies") & filters.private)
+    for fpath in files:
+        try:
+            size = os.path.getsize(fpath)
+            mtime = os.path.getmtime(fpath)
+            modified = datetime.datetime.fromtimestamp(mtime).strftime("%d %b %H:%M")
+
+            with open(fpath, "r", errors="ignore") as f:
+                content = f.read()
+
+            lines = [l for l in content.splitlines() if l.strip() and not l.startswith("#")]
+            yt_ok = any("youtube" in l.lower() or "google" in l.lower() for l in lines)
+
+            if not yt_ok:
+                all_yt_ok = False
+
+            total_entries += len(lines)
+            fname = os.path.basename(fpath)
+            icon = "✅" if yt_ok else "⚠️"
+            file_details.append(
+                f"{icon} <code>{fname}</code> — {len(lines)} entries, {size:,}B, updated {modified}"
+            )
+        except Exception as e:
+            file_details.append(f"❌ <code>{os.path.basename(fpath)}</code> — Error: {e}")
+
+    files_text = "\n".join(file_details)
+    overall = "✅ Ready" if all_yt_ok else "⚠️ Check cookies — YouTube entries missing"
+
+    await message.reply_text(
+        f"<blockquote><b>🍪 Cookie Status</b>\n\n"
+        f"📂 Total files: <b>{len(files)}</b>\n"
+        f"📊 Total entries: <b>{total_entries}</b>\n"
+        f"Status: {overall}\n\n"
+        f"<b>Files:</b>\n{files_text}\n\n"
+        f"• /scook — upload new cookies\n"
+        f"• /dcook — delete all cookies</blockquote>"
+    )
+
+
+# ── /dcook — Delete cookies ───────────────────────────────────────────────────
+
+@app.on_message(filters.command(["dcook", "delcookies"]) & filters.private)
 async def del_cookies_cmd(_, message: types.Message):
     if not message.from_user or not _is_owner(message.from_user.id):
         return
-    if not os.path.exists(COOKIES_PATH):
+
+    files = _all_cookie_files()
+
+    if not files:
         return await message.reply_text(
-            "<blockquote>ℹ️ ɴᴏ ᴄᴏᴏᴋɪᴇꜱ ꜰɪʟᴇ ᴛᴏ ᴅᴇʟᴇᴛᴇ.</blockquote>"
+            "<blockquote>ℹ️ No cookie files to delete.</blockquote>"
         )
-    try:
-        os.remove(COOKIES_PATH)
-        await message.reply_text(
-            "<blockquote>🗑 ᴄᴏᴏᴋɪᴇꜱ ᴅᴇʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ.</blockquote>"
-        )
-    except Exception as e:
-        await message.reply_text(f"<blockquote>❌ {e}</blockquote>")
+
+    # Check if specific file mentioned
+    args = message.text.split()
+    if len(args) > 1:
+        target = args[1].strip()
+        target_path = f"{COOKIES_DIR}/{target}"
+        if not os.path.exists(target_path):
+            return await message.reply_text(
+                f"<blockquote>❌ File not found: <code>{target}</code>\n\n"
+                f"Use /ccook to see all files.</blockquote>"
+            )
+        try:
+            os.remove(target_path)
+            _reload_yt_cookies()
+            remaining = len(_all_cookie_files())
+            return await message.reply_text(
+                f"<blockquote>🗑 Deleted: <code>{target}</code>\n"
+                f"📂 Remaining cookie files: {remaining}</blockquote>"
+            )
+        except Exception as e:
+            return await message.reply_text(f"<blockquote>❌ {e}</blockquote>")
+
+    # Delete ALL cookie files
+    deleted = 0
+    failed = 0
+    for fpath in files:
+        try:
+            os.remove(fpath)
+            deleted += 1
+        except Exception:
+            failed += 1
+
+    _reload_yt_cookies()
+
+    msg = f"<blockquote>🗑 <b>All cookies deleted!</b>\n\n✅ Deleted: {deleted} files"
+    if failed:
+        msg += f"\n❌ Failed: {failed} files"
+    msg += "\n\nUse /scook to upload new cookies.</blockquote>"
+
+    await message.reply_text(msg)
