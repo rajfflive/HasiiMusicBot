@@ -2,14 +2,17 @@ from pyrogram import types as ptypes
 from HasiiMusic import app, config
 
 
+# ─── SBtn — aapke paste wala exact style ──────────────────────────────────────
+# style: 'primary' | 'success' | 'danger' | 'warning'
+# icon_custom_emoji_id: Telegram custom emoji ID (premium feature)
+# Note: style & icon work on Telegram clients that support them.
+
 class SBtn:
-    """
-    Styled button wrapper for Pyrogram.
-    style: 'primary' | 'success' | 'danger' | 'warning'
-    """
-    def __init__(self, text, style=None, callback_data=None, url=None, copy_text=None):
+    def __init__(self, text, style=None, icon_custom_emoji_id=None,
+                 callback_data=None, url=None, copy_text=None):
         self.text = text
         self.style = style
+        self.icon = icon_custom_emoji_id
         self.callback_data = callback_data
         self.url = url
         self.copy_text = copy_text
@@ -25,9 +28,12 @@ class SBtn:
         return ptypes.InlineKeyboardButton(**kwargs)
 
 
-def _b(text, style=None, **kw) -> ptypes.InlineKeyboardButton:
-    return SBtn(text, style=style, **kw).build()
+def _b(text, style=None, icon=None, **kw) -> ptypes.InlineKeyboardButton:
+    """Shorthand builder."""
+    return SBtn(text, style=style, icon_custom_emoji_id=icon, **kw).build()
 
+
+# ─── Inline keyboard class ────────────────────────────────────────────────────
 
 class Inline:
     def __init__(self):
@@ -98,8 +104,8 @@ class Inline:
                     _b("ᴘɪɴɢ",   style="primary", callback_data="help_ping"),
                 ],
                 [
-                    _b("ꜱᴛᴀᴛꜱ",      style="primary", callback_data="help_stats"),
-                    _b("ꜱᴜᴅᴏ",       style="danger",  callback_data="help_sudo"),
+                    _b("ꜱᴛᴀᴛꜱ",       style="primary", callback_data="help_stats"),
+                    _b("ꜱᴜᴅᴏ",        style="danger",  callback_data="help_sudo"),
                     _b("ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ", style="danger",  callback_data="help_maintenance"),
                 ],
                 [_b("ʙᴀᴄᴋ", style="primary", callback_data="start")],
@@ -110,7 +116,7 @@ class Inline:
         return self.ikm([
             [
                 _b("📢 Channel", style="primary", url=config.SUPPORT_CHANNEL),
-                _b("🍂 Support", style="success", url=config.SUPPORT_CHAT),
+                _b("🆘 Support", style="success", url=config.SUPPORT_CHAT),
             ],
             [
                 _b("➕ Add Me to Your Group", style="success",
@@ -154,15 +160,19 @@ class Inline:
     def start_key(
         self, lang: dict, private: bool = False
     ) -> ptypes.InlineKeyboardMarkup:
-        return self.ikm([
-            [_b(lang["add_me"], style="success",
-                url=f"https://t.me/{app.username}?startgroup=true")],
+        # ── Private chat start — styled buttons ──────────────────────────────
+        rows = [
+            [
+                _b(lang["add_me"], style="success",
+                   url=f"https://t.me/{app.username}?startgroup=true")
+            ],
             [_b(lang["help"], style="primary", callback_data="help")],
             [
                 _b(lang["support"], style="danger",  url=config.SUPPORT_CHAT),
                 _b(lang["channel"], style="success", url=config.SUPPORT_CHANNEL),
             ],
-        ])
+        ]
+        return self.ikm(rows)
 
     def yt_key(self, link: str) -> ptypes.InlineKeyboardMarkup:
         return self.ikm([[
