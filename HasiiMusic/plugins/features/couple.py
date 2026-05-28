@@ -1,11 +1,10 @@
 import random
 
 from pyrogram import filters, types
-
 from HasiiMusic import app, db
 
 
-COUPLE_GIFS = [
+COUPLE_GIFS: list[str] = [
     "CgACAgQAAxkBAAFK1VhqF95vqulflsczG8rOv5kU8xERXgACgwkAAiOHJVOi8Zepf6kaozsE",
     "CgACAgQAAxkBAAFK1VxqF96H0tlP-6zxgTkM2dPEluGXpgACGQkAAlFeXFK0i25A-56hVjsE",
     "CgACAgQAAxkBAAFK1V5qF96Z4a__zMB5XO9tsTkXdNCMTwACrggAAkfF1FNhdc6VbRTrEDsE",
@@ -51,20 +50,26 @@ async def _del_couple(user_id: int):
             await db.mongo.HasiiTune.couples.delete_one({"user_id": pid})
 
 
-async def _send_couple_gif(chat_id: int, caption: str):
-    """Try each GIF until one sends successfully."""
-    for gif_id in random.sample(COUPLE_GIFS, len(COUPLE_GIFS)):
-        try:
-            await app.send_animation(chat_id, animation=gif_id, caption=caption)
-            return True
-        except Exception:
-            continue
-    # All GIFs failed — send text only
-    try:
+async def _send_couple_card(chat_id: int, m1: str, m2: str):
+    caption = (
+        f"<b>╔══[ 💑 ɴᴇᴡ ᴄᴏᴜᴘʟᴇ ]══╗</b>\n\n"
+        f"  ❤️  {m1}\n"
+        f"         ×\n"
+        f"  🩷  {m2}\n\n"
+        f"<blockquote>{random.choice(LOVE_QUOTES)}</blockquote>\n\n"
+        f"<b>╚════════════════╝</b>"
+    )
+    gif_sent = False
+    if COUPLE_GIFS:
+        for gif_id in random.sample(COUPLE_GIFS, len(COUPLE_GIFS)):
+            try:
+                await app.send_animation(chat_id, gif_id, caption=caption)
+                gif_sent = True
+                break
+            except Exception:
+                continue
+    if not gif_sent:
         await app.send_message(chat_id, caption, disable_web_page_preview=True)
-    except Exception:
-        pass
-    return False
 
 
 @app.on_message(filters.command("couple") & filters.group)
@@ -79,7 +84,6 @@ async def couple_cmd(_, message: types.Message):
     chat_id = message.chat.id
     user = message.from_user
 
-    # Random couple from group members
     if len(message.command) == 1 and not message.reply_to_message:
         members = []
         try:
@@ -88,24 +92,17 @@ async def couple_cmd(_, message: types.Message):
                     members.append(mem.user)
         except Exception as e:
             return await message.reply_text(f"<blockquote>❌ Error: {e}</blockquote>")
-
         if len(members) < 2:
             return await message.reply_text("<blockquote>❌ ɴᴏᴛ ᴇɴᴏᴜɢʜ ᴍᴇᴍʙᴇʀꜱ!</blockquote>")
-
         u1, u2 = random.sample(members, 2)
         await _set_couple(u1.id, u2.id)
-        caption = (
-            f"<b>╔══[ 💑 ɴᴇᴡ ᴄᴏᴜᴘʟᴇ ]══╗</b>\n\n"
-            f"  ❤️  <a href='tg://user?id={u1.id}'>{u1.first_name}</a>\n"
-            f"         ×\n"
-            f"  🩷  <a href='tg://user?id={u2.id}'>{u2.first_name}</a>\n\n"
-            f"<blockquote>{random.choice(LOVE_QUOTES)}</blockquote>\n\n"
-            f"<b>╚════════════════╝</b>"
+        await _send_couple_card(
+            chat_id,
+            f"<a href='tg://user?id={u1.id}'>{u1.first_name}</a>",
+            f"<a href='tg://user?id={u2.id}'>{u2.first_name}</a>",
         )
-        await _send_couple_gif(chat_id, caption)
         return
 
-    # Couple with mentioned user
     target = None
     if message.reply_to_message and message.reply_to_message.from_user:
         target = message.reply_to_message.from_user
@@ -129,17 +126,8 @@ async def couple_cmd(_, message: types.Message):
         return await message.reply_text(
             f"<blockquote>💔 {target.mention} ɪꜱ ᴀʟʀᴇᴀᴅʏ ɪɴ ᴀ ᴄᴏᴜᴘʟᴇ!</blockquote>"
         )
-
     await _set_couple(user.id, target.id)
-    caption = (
-        f"<b>╔══[ 💑 ɴᴇᴡ ᴄᴏᴜᴘʟᴇ ]══╗</b>\n\n"
-        f"  ❤️  {user.mention}\n"
-        f"         ×\n"
-        f"  🩷  {target.mention}\n\n"
-        f"<blockquote>{random.choice(LOVE_QUOTES)}</blockquote>\n\n"
-        f"<b>╚════════════════╝</b>"
-    )
-    await _send_couple_gif(chat_id, caption)
+    await _send_couple_card(chat_id, user.mention, target.mention)
 
 
 @app.on_message(filters.command("uncouple") & filters.group)
@@ -150,11 +138,9 @@ async def uncouple_cmd(_, message: types.Message):
         pass
     if not message.from_user:
         return
-
     doc = await _get_couple(message.from_user.id)
     if not doc:
         return await message.reply_text("<blockquote>💔 ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴀ ᴄᴏᴜᴘʟᴇ ʏᴇᴛ.</blockquote>")
-
     pm = "ᴜɴᴋɴᴏᴡɴ"
     if pid := doc.get("partner_id"):
         try:
@@ -162,7 +148,6 @@ async def uncouple_cmd(_, message: types.Message):
             pm = p.mention
         except Exception:
             pass
-
     await _del_couple(message.from_user.id)
     await message.reply_text(
         f"<blockquote>💔 {message.from_user.mention} ᴀɴᴅ {pm} ʜᴀᴠᴇ ʙʀᴏᴋᴇɴ ᴜᴘ 🌧️\n\n"
@@ -178,24 +163,20 @@ async def mycouple_cmd(_, message: types.Message):
         pass
     if not message.from_user:
         return
-
     check = message.from_user
     if message.reply_to_message and message.reply_to_message.from_user:
         check = message.reply_to_message.from_user
-
     doc = await _get_couple(check.id)
     if not doc:
         return await message.reply_text(
             f"<blockquote>💔 {check.mention} ɪꜱ ɴᴏᴛ ɪɴ ᴀ ᴄᴏᴜᴘʟᴇ ʏᴇᴛ.\n"
             f"ᴜꜱᴇ /ᴄᴏᴜᴘʟᴇ ᴛᴏ ꜰɪɴᴅ ᴀ ᴍᴀᴛᴄʜ 💕</blockquote>"
         )
-
     try:
         partner = await app.get_users(doc["partner_id"])
         pm = partner.mention
     except Exception:
         pm = "ᴜɴᴋɴᴏᴡɴ"
-
     await message.reply_text(
         f"<b>╔══[ 💑 ᴄᴏᴜᴘʟᴇ ɪɴꜰᴏ ]══╗</b>\n\n"
         f"  ❤️  {check.mention}\n"
