@@ -18,8 +18,12 @@ from HasiiMusic.helpers._play import checkUB
 logger = logging.getLogger(__name__)
 
 
-# /getid se sticker id lo HasiiMusic bot se, yahan paste karo
-PLAY_STICKERS: list[str] = []
+PLAY_STICKERS: list[str] = [
+    "CAACAgUAAxkBAAFK0EBqF2Hz5XIE7xHiEXymgH80LfpcvgAC-x4AAmuHwVQuNt2y6iv3tTsE",
+    "CAACAgUAAxkBAAFK0EFqF2Hzep2LEv4IgHLGdhJ-kHNncQACxhwAAjqiuVScgTvFrqU3OjsE",
+    "CAACAgUAAxkBAAFK0EJqF2HzVULsHMM6CmOUy3mZFYtuJAAC9SIAAujBwFQBHAjKr4hsUjsE",
+    "CAACAgUAAxkBAAFK0ENqF2H06DbUedXZT5zqDIjCq5nxOAAClyMAApCJuVQUFrZzrk7S7DsE",
+]
 
 
 async def send_random_sticker(chat_id: int) -> None:
