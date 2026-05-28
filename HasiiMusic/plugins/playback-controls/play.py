@@ -18,6 +18,7 @@ from HasiiMusic.helpers._play import checkUB
 logger = logging.getLogger(__name__)
 
 
+# ─── Sticker IDs — replace with your own working sticker file_ids ───────────
 PLAY_STICKERS: list[str] = [
     "CAACAgUAAxkBAAFK0EBqF2Hz5XIE7xHiEXymgH80LfpcvgAC-x4AAmuHwVQuNt2y6iv3tTsE",
     "CAACAgUAAxkBAAFK0EFqF2Hzep2LEv4IgHLGdhJ-kHNncQACxhwAAjqiuVScgTvFrqU3OjsE",
@@ -29,10 +30,13 @@ PLAY_STICKERS: list[str] = [
 async def send_random_sticker(chat_id: int) -> None:
     if not PLAY_STICKERS:
         return
-    try:
-        await app.send_sticker(chat_id, random.choice(PLAY_STICKERS))
-    except Exception as e:
-        logger.warning(f"Sticker failed {chat_id}: {e}")
+    for sticker_id in random.sample(PLAY_STICKERS, len(PLAY_STICKERS)):
+        try:
+            await app.send_sticker(chat_id, sticker_id)
+            return
+        except Exception as e:
+            logger.warning(f"[Play] Sticker failed ({sticker_id[:20]}...): {e}")
+            continue
 
 
 async def safe_edit(message, text, **kwargs):
@@ -54,10 +58,10 @@ async def safe_reply(message, text, **kwargs):
     try:
         return await message.reply_text(text, **kwargs)
     except (ChatSendPlainForbidden, ChatWriteForbidden):
-        logger.warning(f"Cannot send in {message.chat.id}")
+        logger.warning(f"[Play] Cannot send in {message.chat.id}")
         return None
     except Exception as e:
-        logger.error(f"Reply failed: {e}")
+        logger.error(f"[Play] Reply failed: {e}")
         return None
 
 
@@ -222,15 +226,23 @@ async def play_hndlr(
             return
 
     if not file.file_path:
+        await safe_edit(sent, f"{play_emoji} ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ...")
         file.file_path = await yt.download(
             file.id, is_live=file.is_live, video=getattr(file, "video", False),
         )
         if not file.file_path:
-            await safe_edit(sent,
-                "<blockquote>❌ Download failed.\n\n"
-                "• YouTube bot detection\n"
-                "• Region-blocked or private\n"
-                "• Age-restricted</blockquote>",
+            # ── Download completely failed — friendly message ──────────────
+            logger.error(f"[Play] All download methods failed for {file.id} in chat {chat_id}")
+            await safe_edit(
+                sent,
+                "<blockquote>"
+                "❌ <b>Song play nahi ho sakti abhi.</b>\n\n"
+                "YouTube temporarily block kar raha hai. Bot Invidious se try kar raha tha par woh bhi fail hua.\n\n"
+                "<b>Solutions:</b>\n"
+                "• Thodi der baad try karo\n"
+                "• Dusra song try karo\n"
+                f"• Support: {config.SUPPORT_CHAT}"
+                "</blockquote>",
             )
             return
 
@@ -245,14 +257,19 @@ async def play_hndlr(
         play_ok = True
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"[Play] play_media error in {chat_id}: {error_msg}")
         if "bot" in error_msg.lower() or "sign in" in error_msg.lower():
-            await safe_edit(sent,
-                f"<blockquote>❌ YouTube bot detection.\n\nUpdate cookies.\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>")
+            await safe_edit(
+                sent,
+                "<blockquote>❌ YouTube bot detection.\n\nOwner ko /setcookies bhejo.\n\n"
+                f"Support: {config.SUPPORT_CHAT}</blockquote>",
+            )
         else:
-            await safe_edit(sent,
-                f"<blockquote>❌ Playback error:\n{error_msg}\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>")
+            await safe_edit(
+                sent,
+                f"<blockquote>❌ Playback error:\n<code>{error_msg[:200]}</code>\n\n"
+                f"Support: {config.SUPPORT_CHAT}</blockquote>",
+            )
 
     if play_ok:
         await send_random_sticker(m.chat.id)
@@ -262,7 +279,9 @@ async def play_hndlr(
 
     added = playlist_to_queue(chat_id, tracks)
     try:
-        await app.send_message(chat_id=m.chat.id,
-            text=m.lang["playlist_queued"].format(len(tracks)) + added)
+        await app.send_message(
+            chat_id=m.chat.id,
+            text=m.lang["playlist_queued"].format(len(tracks)) + added,
+        )
     except Exception:
         pass
