@@ -18,20 +18,17 @@ from HasiiMusic.helpers._play import checkUB
 logger = logging.getLogger(__name__)
 
 
-PLAY_STICKERS = [
-    "CAACAgUAAxkBAAFK0EBqF2Hz5XIE7xHiEXymgH80LfpcvgAC-x4AAmuHwVQuNt2y6iv3tTsE",
-    "CAACAgUAAxkBAAFK0EFqF2Hzep2LEv4IgHLGdhJ-kHNncQACxhwAAjqiuVScgTvFrqU3OjsE",
-    "CAACAgUAAxkBAAFK0EJqF2HzVULsHMM6CmOUy3mZFYtuJAAC9SIAAujBwFQBHAjKr4hsUjsE",
-    "CAACAgUAAxkBAAFK0ENqF2H06DbUedXZT5zqDIjCq5nxOAAClyMAApCJuVQUFrZzrk7S7DsE",
-]
+# /getid se sticker id lo HasiiMusic bot se, yahan paste karo
+PLAY_STICKERS: list[str] = []
 
 
 async def send_random_sticker(chat_id: int) -> None:
-    sticker = random.choice(PLAY_STICKERS)
+    if not PLAY_STICKERS:
+        return
     try:
-        await app.send_sticker(chat_id, sticker)
+        await app.send_sticker(chat_id, random.choice(PLAY_STICKERS))
     except Exception as e:
-        logger.warning(f"Sticker send failed: {e}")
+        logger.warning(f"Sticker failed {chat_id}: {e}")
 
 
 async def safe_edit(message, text, **kwargs):
@@ -53,10 +50,10 @@ async def safe_reply(message, text, **kwargs):
     try:
         return await message.reply_text(text, **kwargs)
     except (ChatSendPlainForbidden, ChatWriteForbidden):
-        logger.warning(f"Cannot send text in chat {message.chat.id}")
+        logger.warning(f"Cannot send in {message.chat.id}")
         return None
     except Exception as e:
-        logger.error(f"Failed to send reply: {e}")
+        logger.error(f"Reply failed: {e}")
         return None
 
 
@@ -101,40 +98,22 @@ async def play_hndlr(
         if channel_id is None:
             return await safe_reply(m,
                 "<blockquote>❌ Channel play is not enabled.\n\n"
-                "To enable for linked channel:\n"
-                "`/channelplay linked`\n\n"
-                "To enable for any channel:\n"
-                "`/channelplay [channel_id]`</blockquote>"
+                "Enable: `/channelplay linked`</blockquote>"
             )
         try:
             chat = await app.get_chat(channel_id)
             chat_id = channel_id
         except Exception:
             await db.set_cmode(m.chat.id, None)
-            return await safe_reply(m,
-                "<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ɢᴇᴛ ᴄʜᴀɴɴᴇʟ.\n\n"
-                "ᴍᴀᴋᴇ ꜱᴜʀᴇ ɪ'ᴍ ᴀᴅᴍɪɴ ɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀɴᴅ ᴄʜᴀɴɴᴇʟ ᴘʟᴀʏ ɪꜱ ꜱᴇᴛ ᴄᴏʀʀᴇᴄᴛʟʏ.</blockquote>"
-            )
+            return await safe_reply(m, "<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ɢᴇᴛ ᴄʜᴀɴɴᴇʟ.</blockquote>")
 
         client = await db.get_client(channel_id)
         try:
             await app.get_chat_member(channel_id, client.id)
         except Exception:
             try:
-                if chat.username:
-                    invite_link = chat.username
-                else:
-                    try:
-                        invite_link = chat.invite_link
-                        if not invite_link:
-                            invite_link = await app.export_chat_invite_link(channel_id)
-                    except Exception:
-                        return await safe_reply(m,
-                            f"<blockquote>❌ ᴀꜱꜱɪꜱᴛᴀɴᴛ ɴᴏᴛ ɪɴ ᴄʜᴀɴɴᴇʟ!\n\n"
-                            f"ᴘʟᴇᴀꜱᴇ ᴀᴅᴅ @{client.username if client.username else client.mention} "
-                            f"ᴛᴏ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀꜱ ᴀᴅᴍɪɴ ᴡɪᴛʜ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴘᴇʀᴍɪꜱꜱɪᴏɴꜱ.</blockquote>"
-                        )
-                join_msg = await safe_reply(m, "<blockquote>🔄 ᴊᴏɪɴɪɴɢ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴛᴏ ᴄʜᴀɴɴᴇʟ...</blockquote>")
+                invite_link = chat.username or chat.invite_link or await app.export_chat_invite_link(channel_id)
+                join_msg = await safe_reply(m, "<blockquote>🔄 ᴊᴏɪɴɪɴɢ ᴀꜱꜱɪꜱᴛᴀɴᴛ...</blockquote>")
                 await client.join_chat(invite_link)
                 await asyncio.sleep(1)
                 try:
@@ -142,18 +121,15 @@ async def play_hndlr(
                 except Exception:
                     pass
             except Exception as e:
-                return await safe_reply(m,
-                    f"<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴛᴏ ᴄʜᴀɴɴᴇʟ!\n\n"
-                    f"Error: {e}</blockquote>"
-                )
+                return await safe_reply(m, f"<blockquote>❌ ᴊᴏɪɴ ꜰᴀɪʟᴇᴅ: {e}</blockquote>")
 
-    # Searching message — NO emoji, sticker comes after play
+    play_emoji = m.lang.get("play_emoji", "🎵")
     try:
-        sent = await safe_reply(m, m.lang["play_searching"].format(""))
+        sent = await safe_reply(m, m.lang["play_searching"].format(play_emoji))
     except FloodWait as e:
         await asyncio.sleep(e.value)
         try:
-            sent = await safe_reply(m, m.lang["play_searching"].format(""))
+            sent = await safe_reply(m, m.lang["play_searching"].format(play_emoji))
         except Exception:
             return
     except Exception:
@@ -178,10 +154,7 @@ async def play_hndlr(
                 tracks = await yt.playlist(config.PLAYLIST_LIMIT, mention, url)
             except Exception:
                 await safe_edit(sent,
-                    "<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ꜰᴇᴛᴄʜ ᴘʟᴀʏʟɪꜱᴛ.\n\n"
-                    "ʏᴏᴜᴛᴜʙᴇ ᴘʟᴀʏʟɪꜱᴛꜱ ᴀʀᴇ ᴄᴜʀʀᴇɴᴛʟʏ ᴇxᴘᴇʀɪᴇɴᴄɪɴɢ ɪꜱꜱᴜᴇꜱ. "
-                    "ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴘʟᴀʏɪɴɢ ɪɴᴅɪᴠɪᴅᴜᴀʟ ꜱᴏɴɢꜱ ɪɴꜱᴛᴇᴀᴅ.</blockquote>"
-                )
+                    "<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ꜰᴇᴛᴄʜ ᴘʟᴀʏʟɪꜱᴛ.</blockquote>")
                 return
             if not tracks:
                 await safe_edit(sent, m.lang["playlist_error"])
@@ -223,7 +196,6 @@ async def play_hndlr(
     else:
         position = queue.add(chat_id, file)
         if await db.get_call(chat_id):
-            # Queued — no sticker
             await safe_edit(
                 sent,
                 m.lang["play_queued"].format(
@@ -247,17 +219,14 @@ async def play_hndlr(
 
     if not file.file_path:
         file.file_path = await yt.download(
-            file.id,
-            is_live=file.is_live,
-            video=getattr(file, "video", False),
+            file.id, is_live=file.is_live, video=getattr(file, "video", False),
         )
         if not file.file_path:
             await safe_edit(sent,
-                "<blockquote>❌ Failed to download media.\n\n"
-                "Possible reasons:\n"
-                "• YouTube detected bot activity (update cookies)\n"
-                "• Video is region-blocked or private\n"
-                "• Age-restricted content (requires cookies)</blockquote>",
+                "<blockquote>❌ Download failed.\n\n"
+                "• YouTube bot detection\n"
+                "• Region-blocked or private\n"
+                "• Age-restricted</blockquote>",
             )
             return
 
@@ -274,19 +243,13 @@ async def play_hndlr(
         error_msg = str(e)
         if "bot" in error_msg.lower() or "sign in" in error_msg.lower():
             await safe_edit(sent,
-                "<blockquote>❌ YouTube bot detection triggered.\n\n"
-                "Solution:\n"
-                "• Update YouTube cookies\n"
-                "• Wait a few minutes before trying again\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>",
-            )
+                f"<blockquote>❌ YouTube bot detection.\n\nUpdate cookies.\n\n"
+                f"Support: {config.SUPPORT_CHAT}</blockquote>")
         else:
             await safe_edit(sent,
                 f"<blockquote>❌ Playback error:\n{error_msg}\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>",
-            )
+                f"Support: {config.SUPPORT_CHAT}</blockquote>")
 
-    # Sticker ONLY on successful play
     if play_ok:
         await send_random_sticker(m.chat.id)
 
