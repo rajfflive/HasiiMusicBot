@@ -26,8 +26,8 @@ class YouTube:
         self.cookies = []
         self.checked = False
         self.warned = False
-        self.cookies_expired = False       # ← FIX 1: missing tha, AttributeError aata tha
-        self.last_cookie_alert = 0.0       # ← FIX 1: missing tha, AttributeError aata tha
+        self.cookies_expired = False
+        self.last_cookie_alert = 0.0
 
         self.regex = re.compile(
             r"(https?://)?(www\.|m\.|music\.)?"
@@ -67,13 +67,16 @@ class YouTube:
         return None
 
     def _to_raw_url(self, url: str) -> str:
-        # ← FIX 2: Batbin/Hastebin/Rentry sab support — pehle sirf pastebin kaam karta tha
         if "/raw/" in url or url.endswith("/raw"):
             return url
         if "pastebin.com/" in url:
             parts = url.split("pastebin.com/")
             slug = parts[1].strip("/").split("/")[0]
             return f"https://pastebin.com/raw/{slug}"
+        if "batbin.me/" in url:
+            parts = url.split("batbin.me/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://batbin.me/raw/{slug}"
         if "batbin.de/" in url:
             parts = url.split("batbin.de/")
             slug = parts[1].strip("/").split("/")[0]
@@ -128,7 +131,7 @@ class YouTube:
         for url in urls:
             try:
                 path = f"HasiiMusic/cookies/cookie{random.randint(10000, 99999)}.txt"
-                link = self._to_raw_url(url)   # ← FIX 2: smart conversion
+                link = self._to_raw_url(url)
                 logger.info(f"🔗 Fetching cookie from: {link}")
                 async with aiohttp.ClientSession() as session:
                     async with session.get(link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -140,7 +143,6 @@ class YouTube:
                         if not content or len(content) < 50:
                             logger.error(f"❌ Cookie file empty or invalid from {url} (size={len(content) if content else 0})")
                             continue
-                        # ← FIX 3: HTML page detect karo
                         content_text = content.decode("utf-8", errors="ignore")
                         if content_text.strip().startswith("<!DOCTYPE") or content_text.strip().startswith("<html"):
                             logger.error(f"❌ Got HTML page instead of cookies from {url}")
@@ -277,6 +279,14 @@ class YouTube:
     async def download(self, video_id: str, is_live: bool = False, video: bool = False) -> Optional[str]:
         url = self.base + video_id
 
+        # Stale .part files delete karo — Railway restart ke baad "format not available" cause karte hain
+        for stale in glob.glob(f"downloads/{video_id}*.part"):
+            try:
+                os.remove(stale)
+            except Exception:
+                pass
+
+        # ── Live stream ───────────────────────────────────────────────────────
         if is_live:
             cookie = self.get_cookies()
             ydl_opts: dict = {
@@ -315,6 +325,7 @@ class YouTube:
                 logger.error("Live stream URL extraction timed out for %s", video_id)
                 return None
 
+        # ── Audio / Video file download ───────────────────────────────────────
         filename_pattern = f"downloads/{video_id}"
         existing_files = [f for f in glob.glob(f"{filename_pattern}.*") if not f.endswith(".part")]
 
@@ -346,9 +357,9 @@ class YouTube:
                 "noplaylist": True,
                 "geo_bypass": True,
                 "no_warnings": True,
-                "overwrites": False,
+                "overwrites": True,
                 "nocheckcertificate": True,
-                "continuedl": True,
+                "continuedl": False,
                 "noprogress": True,
                 "concurrent_fragment_downloads": 4,
                 "http_chunk_size": 524288,
@@ -375,7 +386,7 @@ class YouTube:
             else:
                 ydl_opts = {
                     **base_opts,
-                    "format": "bestaudio/best",
+                    "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio[ext=opus]/bestaudio/best",
                     "postprocessors": [],
                 }
 
