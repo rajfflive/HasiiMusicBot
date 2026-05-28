@@ -1,3 +1,14 @@
+# ==============================================================================
+# youtube.py - YouTube Download & Search Handler
+# ==============================================================================
+# This file handles all YouTube-related operations:
+# - Searching for videos/audio
+# - Downloading YouTube content using yt-dlp
+# - Managing YouTube cookies for age-restricted content
+# - Caching search results for better performance
+# - Validating YouTube URLs
+# ==============================================================================
+
 import os
 import re
 import glob
@@ -15,248 +26,168 @@ from py_yt import Playlist, VideosSearch
 from HasiiMusic import config, logger
 from HasiiMusic.helpers import Track, utils
 
-# ─── User-Agent Pool (rotate to avoid fingerprinting) ───────────────────────
-USER_AGENTS = [
-    # iOS Safari
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
-    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-    # Android Chrome
-    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-    # Desktop Chrome
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.6367.60 Safari/537.36",
-]
-IOS_UA = USER_AGENTS[0]
-
-COOKIE_FAIL_PHRASES = [
-    "sign in to confirm",
-    "bot detection",
-    "video unavailable",
-    "this video is unavailable",
-    "age-restricted",
-    "age restricted",
-    "private video",
-    "confirm you",
-    "http error 429",
-    "too many requests",
-    "blocked",
-    "access denied",
-    "403",
-    "download failed",
-    "precondition check failed",
-    "not available in your country",
-    "region",
-]
-
-# ─── Invidious Instances (updated & verified 2025) ──────────────────────────
-INVIDIOUS_INSTANCES = [
-    "https://inv.nadeko.net",
-    "https://invidious.privacydev.net",
-    "https://yt.artemislena.eu",
-    "https://invidious.lunar.icu",
-    "https://iv.datura.network",
-    "https://invidious.flokinet.to",
-    "https://invidious.tiekoetter.com",
-    "https://invidious.io.lol",
-    "https://invidious.fdn.fr",
-    "https://invidious.perennialte.ch",
-    "https://vid.puffyan.us",
-    "https://invidious.nerdvpn.de",
-    "https://yt.cdaut.de",
-    "https://invidious.drgns.space",
-    "https://yewtu.be",
-]
-
 
 class YouTube:
     def __init__(self):
-        self.base = "https://www.youtube.com/watch?v="
-        self.cookies: list[str] = []
-        self.checked = False
-        self.warned = False
-        self.cookies_expired = False
-        self.last_cookie_alert: float = 0.0
+        """Initialize YouTube handler with configuration and caching."""
+        self.base = "https://www.youtube.com/watch?v="  # Base YouTube URL
+        self.cookies = []  # List of available cookie files
+        self.checked = False  # Whether cookies directory has been checked
+        self.warned = False  # Whether missing cookies warning has been shown
+
+        # Regular expression to match YouTube URLs (videos, shorts, live, playlists)
         self.regex = re.compile(
             r"(https?://)?(www\.|m\.|music\.)?"
             r"(youtube\.com/(watch\?v=|shorts/|live/|embed/|playlist\?list=)|youtu\.be/)"
             r"([A-Za-z0-9_-]{11}|PL[A-Za-z0-9_-]+)([&?][^\s]*)?"
         )
-        self.search_cache: dict = {}
-        self._download_semaphore = asyncio.Semaphore(5)
-        self._max_video_height = getattr(config, "VIDEO_MAX_HEIGHT", 1080)
-        self._ua_index = 0
 
-    def _next_ua(self) -> str:
-        ua = USER_AGENTS[self._ua_index % len(USER_AGENTS)]
-        self._ua_index += 1
-        return ua
+        # Cache search results to reduce API calls (10 minute TTL)
+        self.search_cache = {}  # {"query_video": (result, timestamp)}
+        self.cache_time = {}  # Deprecated, using tuple in search_cache instead
+
+        # **PERFORMANCE FIX**: Limit concurrent downloads to prevent bandwidth saturation
+        # With 15-20 groups, unlimited concurrent downloads cause 320+ connections
+        self._download_semaphore = asyncio.Semaphore(5)  # Max 5 simultaneous downloads
+        self._max_video_height = getattr(config, "VIDEO_MAX_HEIGHT", 1080)
 
     def _locate_download_file(self, video_id: str, video: bool = False) -> Optional[str]:
+        """Locate any completed download file for a video id."""
+        pattern = f"downloads/{video_id}*"
         candidates = sorted([
-            p for p in glob.glob(f"downloads/{video_id}*")
-            if not p.endswith((".part", ".ytdl", ".info.json", ".temp"))
+            path for path in glob.glob(pattern)
+            if not path.endswith((".part", ".ytdl", ".info.json", ".temp"))
         ])
+
         video_exts = {".mp4", ".mkv", ".webm", ".mov"}
         audio_exts = {".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav", ".flac"}
+
         if video:
-            for p in candidates:
-                if not os.path.isdir(p) and Path(p).suffix.lower() in video_exts:
-                    return p
+            for path in candidates:
+                if os.path.isdir(path):
+                    continue
+                if Path(path).suffix.lower() in video_exts:
+                    return path
         else:
-            for p in candidates:
-                if not os.path.isdir(p) and Path(p).suffix.lower() in audio_exts:
-                    return p
-            for p in candidates:
-                if not os.path.isdir(p) and Path(p).suffix.lower() in {".mp4", ".mkv", ".mov"}:
-                    return p
-        for p in candidates:
-            if not os.path.isdir(p):
-                return p
+            for path in candidates:
+                if os.path.isdir(path):
+                    continue
+                if Path(path).suffix.lower() in audio_exts:
+                    return path
+
+        for path in candidates:
+            if os.path.isdir(path):
+                continue
+            return path
         return None
 
-    def _is_block_error(self, err: str) -> bool:
-        return any(p in err.lower() for p in COOKIE_FAIL_PHRASES)
-
-    async def _alert_owner(self, reason: str = ""):
-        now = time.time()
-        if now - self.last_cookie_alert < 3600:
-            return
-        self.last_cookie_alert = now
-        self.cookies_expired = True
-        # Always log to console
-        logger.warning(
-            f"[YouTube] ⚠️ Block/Cookie expire detected! Reason: {reason or 'Unknown'}. "
-            "Bot is using Invidious fallback. Send /setcookies <url> to fix."
-        )
-        try:
-            from HasiiMusic import app
-            if config.LOGGER_ID:
-                reason_line = f"\n📌 <b>Error:</b> <code>{reason[:200]}</code>" if reason else ""
-                await app.send_message(
-                    config.LOGGER_ID,
-                    "<blockquote expandable>"
-                    "<b>⚠️ YouTube Block / Cookie Expire!</b>\n\n"
-                    "YouTube direct download fail ho gaya.\n"
-                    "Bot ab <b>Invidious fallback</b> se play kar raha hai."
-                    f"{reason_line}\n\n"
-                    "<b>🔧 Fix Karo:</b>\n"
-                    "1. PC pe YouTube login karo\n"
-                    "2. Nayi cookies export karo (Netscape format)\n"
-                    "3. <code>/setcookies &lt;url&gt;</code> bhejo\n\n"
-                    "⚡ Jab tak fix nahi hota, Invidious se play hoga."
-                    "</blockquote>",
-                    parse_mode="html",
-                )
-        except Exception as e:
-            logger.error(f"[YouTube] Failed to alert owner: {e}")
-
-    def get_cookies(self) -> Optional[str]:
+    def get_cookies(self):
         if not self.checked:
-            try:
-                os.makedirs("HasiiMusic/cookies", exist_ok=True)
-                self.cookies = [
-                    f for f in os.listdir("HasiiMusic/cookies")
-                    if f.endswith(".txt")
-                ]
-            except Exception as e:
-                logger.error(f"[YouTube] Cookie folder error: {e}")
+            for file in os.listdir("HasiiMusic/cookies"):
+                if file.endswith(".txt"):
+                    self.cookies.append(file)
             self.checked = True
-
         if not self.cookies:
             if not self.warned:
                 self.warned = True
-                logger.warning(
-                    "[YouTube] ⚠️ No cookies found in HasiiMusic/cookies/. "
-                    "Invidious fallback is active. Send /setcookies <url> to add cookies."
-                )
+                logger.warning("Cookies are missing; downloads might fail.")
             return None
-
-        chosen = random.choice(self.cookies)
-        logger.debug(f"[YouTube] Using cookie: {chosen}")
-        return f"HasiiMusic/cookies/{chosen}"
+        return f"HasiiMusic/cookies/{random.choice(self.cookies)}"
 
     async def save_cookies(self, urls: list[str]) -> None:
-        logger.info(f"[YouTube] Downloading {len(urls)} cookie file(s)...")
-        os.makedirs("HasiiMusic/cookies", exist_ok=True)
-        saved = 0
+        logger.info("🍪 Saving cookies from urls...")
+        saved_count = 0
         for url in urls:
             try:
                 path = f"HasiiMusic/cookies/cookie{random.randint(10000, 99999)}.txt"
-                link = url.replace("batbin.me/", "batbin.me/raw/") \
-                    if ("batbin.me" in url and "/raw/" not in url) else url
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                link = url.replace("me/", "me/raw/")
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(link) as resp:
                         if resp.status != 200:
-                            logger.error(f"[YouTube] Cookie HTTP {resp.status} — {url}")
+                            logger.error(f"❌ Cookie download failed: HTTP {resp.status} from {url}")
                             continue
                         content = await resp.read()
-                        if len(content) < 50:
-                            logger.error(f"[YouTube] Cookie too small ({len(content)} bytes) — {url}")
+                        if not content or len(content) < 50:
+                            logger.error(f"❌ Cookie file empty or invalid from {url}")
                             continue
                         with open(path, "wb") as fw:
                             fw.write(content)
-                        name = os.path.basename(path)
-                        if name not in self.cookies:
-                            self.cookies.append(name)
-                        self.cookies_expired = False
-                        self.warned = False
-                        self.last_cookie_alert = 0.0
-                        saved += 1
-                        logger.info(f"[YouTube] ✅ Cookie saved: {name} ({len(content)} bytes)")
+                        if os.path.exists(path) and os.path.getsize(path) > 0:
+                            saved_count += 1
+                            # Add the new cookie file to the list immediately
+                            cookie_filename = os.path.basename(path)
+                            if cookie_filename not in self.cookies:
+                                self.cookies.append(cookie_filename)
+                            logger.info(f"✅ Saved: {cookie_filename} ({len(content)} bytes)")
             except Exception as e:
-                logger.error(f"[YouTube] Cookie download error for {url}: {e}")
+                logger.error(f"❌ Cookie download error from {url}: {e}")
+        
+        # Force refresh of cookie list after download
         self.checked = True
-        if saved:
-            logger.info(f"[YouTube] ✅ {saved} cookie(s) saved and ready.")
+        
+        if saved_count > 0:
+            logger.info(f"✅ Cookies saved. ({saved_count} file(s))")
         else:
-            logger.warning("[YouTube] ❌ No cookies were saved! Check the URLs.")
+            logger.error("❌ No cookies saved! Check COOKIE_URL in .env. YouTube downloads will fail!")
 
     def valid(self, url: str) -> bool:
         return bool(re.match(self.regex, url))
 
-    def url(self, message_1: types.Message) -> Optional[str]:
+    def url(self, message_1: types.Message) -> Union[str, None]:
         messages = [message_1]
+        link = None
         if message_1.reply_to_message:
             messages.append(message_1.reply_to_message)
-        link = None
+
         for message in messages:
             text = message.text or message.caption or ""
+
             if message.entities:
                 for entity in message.entities:
                     if entity.type == enums.MessageEntityType.URL:
-                        link = text[entity.offset: entity.offset + entity.length]
+                        link = text[entity.offset: entity.offset +
+                                    entity.length]
                         break
+
             if message.caption_entities:
                 for entity in message.caption_entities:
                     if entity.type == enums.MessageEntityType.TEXT_LINK:
                         link = entity.url
                         break
+
         if link:
             return link.split("&si")[0].split("?si")[0]
         return None
 
-    async def search(self, query: str, m_id: int) -> Optional[Track]:
+    async def search(self, query: str, m_id: int) -> Track | None:
+        # Check cache first (10-minute TTL)
+        cache_key = query
         current_time = asyncio.get_running_loop().time()
-        if query in self.search_cache:
-            cached, ts = self.search_cache[query]
-            if current_time - ts < 600:
-                fresh = replace(cached)
+
+        if cache_key in self.search_cache:
+            cached_result, cache_timestamp = self.search_cache[cache_key]
+            if current_time - cache_timestamp < 600:  # 10 minutes
+                # Return a fresh copy so downstream mutations don't leak back into cache
+                fresh = replace(cached_result)
                 fresh.message_id = m_id
                 fresh.file_path = None
                 fresh.user = None
                 fresh.time = 0
                 fresh.video = False
                 return fresh
+
         try:
-            results = await VideosSearch(query, limit=1).next()
+            _search = VideosSearch(query, limit=1)
+            results = await _search.next()
         except Exception as e:
-            logger.warning(f"[YouTube] Search failed '{query}': {e}")
+            logger.warning(f"⚠️ YouTube search failed for '{query}': {e}")
             return None
+
         if results and results["result"]:
             data = results["result"][0]
             duration = data.get("duration")
             is_live = duration is None or duration == "LIVE"
+
             track = Track(
                 id=data.get("id"),
                 channel_name=data.get("channel", {}).get("name"),
@@ -264,359 +195,298 @@ class YouTube:
                 duration_sec=0 if is_live else utils.to_seconds(duration),
                 message_id=m_id,
                 title=data.get("title")[:25],
-                thumbnail=data.get("thumbnails", [{}])[-1].get("url").split("?")[0],
+                thumbnail=data.get(
+                    "thumbnails", [{}])[-1].get("url").split("?")[0],
                 url=data.get("link"),
                 view_count=data.get("viewCount", {}).get("short"),
                 is_live=is_live,
             )
-            self.search_cache[query] = (track, current_time)
+
+            # Cache the result
+            self.search_cache[cache_key] = (track, current_time)
+            # Limit cache size to 100 entries
             if len(self.search_cache) > 100:
-                oldest = min(self.search_cache, key=lambda k: self.search_cache[k][1])
-                del self.search_cache[oldest]
+                oldest_key = min(self.search_cache.keys(),
+                                 key=lambda k: self.search_cache[k][1])
+                del self.search_cache[oldest_key]
+
             return replace(track)
         return None
 
     async def playlist(self, limit: int, user: str, url: str) -> list[Track]:
         try:
             plist = await Playlist.get(url)
+            tracks = []
+
+            # Check if plist has videos
             if not plist or "videos" not in plist or not plist["videos"]:
                 return []
-            tracks = []
+
             for data in plist["videos"][:limit]:
                 try:
+                    # Get thumbnail safely
                     thumbnails = data.get("thumbnails", [])
-                    thumb = thumbnails[-1].get("url", "").split("?")[0] if thumbnails else ""
+                    thumbnail_url = ""
+                    if thumbnails and len(thumbnails) > 0:
+                        thumbnail_url = thumbnails[-1].get(
+                            "url", "").split("?")[0]
+
+                    # Get link safely
                     link = data.get("link", "")
                     if "&list=" in link:
                         link = link.split("&list=")[0]
-                    tracks.append(Track(
+
+                    track = Track(
                         id=data.get("id", ""),
                         channel_name=data.get("channel", {}).get("name", ""),
                         duration=data.get("duration", "0:00"),
-                        duration_sec=utils.to_seconds(data.get("duration", "0:00")),
-                        title=data.get("title", "Unknown")[:25],
-                        thumbnail=thumb,
+                        duration_sec=utils.to_seconds(
+                            data.get("duration", "0:00")),
+                        title=(data.get("title", "Unknown")[:25]),
+                        thumbnail=thumbnail_url,
                         url=link,
                         user=user,
                         view_count="",
-                    ))
-                except Exception:
+                    )
+                    tracks.append(track)
+                except Exception as e:
+                    # Skip individual track errors
                     continue
+
             return tracks
-        except KeyError:
-            raise Exception("Failed to parse playlist.")
-        except Exception:
+        except KeyError as e:
+            # Handle YouTube API structure changes
+            raise Exception(
+                f"Failed to parse playlist. YouTube may have changed their structure.")
+        except Exception as e:
+            # Re-raise other exceptions
             raise
 
-    def _make_ydl_opts(self, cookie: Optional[str] = None, ua: Optional[str] = None) -> dict:
-        opts: dict = {
-            "quiet": True,
-            "no_warnings": True,
-            "nocheckcertificate": True,
-            "geo_bypass": True,
-            "noplaylist": True,
-            "sleep_interval_requests": 1,
-            "sleep_interval": 1,
-            "max_sleep_interval": 3,
-            "extractor_retries": 3,
-            "socket_timeout": 30,
-            "retries": 3,
-            "fragment_retries": 5,
-            "user_agent": ua or self._next_ua(),
-            # ── Key fix: use multiple player clients in priority order ──
-            "extractor_args": {
-                "youtube": {
-                    "player_client": [
-                        "tv_embedded",   # most reliable bypass
-                        "ios",
-                        "android",
-                        "web_creator",
-                        "mweb",
-                        "web",
-                    ],
-                    "player_skip": ["webpage"],
-                }
-            },
-            "http_headers": {
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        }
-        if cookie:
-            opts["cookiefile"] = cookie
-        proxy = os.environ.get("YT_PROXY", "").strip()
-        if proxy:
-            opts["proxy"] = proxy
-        return opts
-
-    def _run_download(
-        self, url: str, ydl_opts: dict, video_id: str, video: bool
-    ) -> tuple[Optional[str], Optional[str]]:
-        inst = None
-        try:
-            inst = yt_dlp.YoutubeDL(ydl_opts)
-            inst.extract_info(url, download=True)
-            time.sleep(0.5)
-            return self._locate_download_file(video_id, video=video), None
-        except yt_dlp.utils.DownloadError as ex:
-            recovered = self._locate_download_file(video_id, video=video)
-            if recovered:
-                return recovered, None
-            return None, str(ex)
-        except Exception as ex:
-            return None, str(ex)
-        finally:
-            if inst:
-                try:
-                    inst.close()
-                except Exception:
-                    pass
-
-    def _run_extract_url(self, url: str, ydl_opts: dict) -> tuple[Optional[str], Optional[str]]:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(url, download=False)
-                if not info:
-                    return None, "No info"
-                direct = info.get("url")
-                if direct:
-                    return direct, None
-                for fmt in info.get("formats", []):
-                    if fmt.get("acodec") != "none" and fmt.get("url"):
-                        return fmt["url"], None
-                return info.get("manifest_url"), None
-            except Exception as ex:
-                return None, str(ex)
-
-    async def _invidious_audio_url(self, video_id: str) -> Optional[str]:
-        shuffled = random.sample(INVIDIOUS_INSTANCES, len(INVIDIOUS_INSTANCES))
-        for instance in shuffled:
-            try:
-                api = f"{instance}/api/v1/videos/{video_id}?fields=adaptiveFormats,formatStreams"
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(
-                        api,
-                        timeout=aiohttp.ClientTimeout(total=12),
-                        headers={"User-Agent": IOS_UA},
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        data = await resp.json()
-                best_url: Optional[str] = None
-                best_bitrate = 0
-                for fmt in data.get("adaptiveFormats", []):
-                    if not fmt.get("type", "").startswith("audio/"):
-                        continue
-                    raw = fmt.get("url", "")
-                    if not raw:
-                        continue
-                    if not raw.startswith("http"):
-                        raw = instance + raw
-                    bitrate = int(fmt.get("bitrate", 0))
-                    if bitrate > best_bitrate:
-                        best_bitrate = bitrate
-                        best_url = raw
-                if best_url:
-                    logger.info(f"[YouTube] ✅ Invidious audio OK [{instance}]: {video_id}")
-                    return best_url
-                for fmt in data.get("formatStreams", []):
-                    raw = fmt.get("url", "")
-                    if raw:
-                        if not raw.startswith("http"):
-                            raw = instance + raw
-                        logger.info(f"[YouTube] ✅ Invidious stream OK [{instance}]: {video_id}")
-                        return raw
-            except asyncio.TimeoutError:
-                logger.debug(f"[YouTube] Invidious timeout: {instance}")
-                continue
-            except Exception as e:
-                logger.debug(f"[YouTube] Invidious {instance} error: {e}")
-                continue
-        logger.error(f"[YouTube] ❌ All Invidious instances failed for: {video_id}")
-        return None
-
-    async def _invidious_video_url(self, video_id: str) -> Optional[str]:
-        shuffled = random.sample(INVIDIOUS_INSTANCES, len(INVIDIOUS_INSTANCES))
-        for instance in shuffled:
-            try:
-                api = f"{instance}/api/v1/videos/{video_id}?fields=adaptiveFormats,formatStreams"
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(
-                        api,
-                        timeout=aiohttp.ClientTimeout(total=12),
-                        headers={"User-Agent": IOS_UA},
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        data = await resp.json()
-                for fmt in data.get("formatStreams", []):
-                    raw = fmt.get("url", "")
-                    if raw:
-                        if not raw.startswith("http"):
-                            raw = instance + raw
-                        return raw
-            except Exception:
-                continue
-        return None
-
-    async def _invidious_live_url(self, video_id: str) -> Optional[str]:
-        shuffled = random.sample(INVIDIOUS_INSTANCES, len(INVIDIOUS_INSTANCES))
-        for instance in shuffled:
-            try:
-                api = f"{instance}/api/v1/videos/{video_id}?fields=hlsUrl,dashManifestUrl"
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(api, timeout=aiohttp.ClientTimeout(total=12)) as resp:
-                        if resp.status != 200:
-                            continue
-                        data = await resp.json()
-                hls = data.get("hlsUrl") or data.get("dashManifestUrl")
-                if hls:
-                    if not hls.startswith("http"):
-                        hls = instance + hls
-                    return hls
-            except Exception:
-                continue
-        return None
-
-    async def download(
-        self, video_id: str, is_live: bool = False, video: bool = False
-    ) -> Optional[str]:
+    async def download(self, video_id: str, is_live: bool = False, video: bool = False) -> Optional[str]:
         url = self.base + video_id
 
-        # ── Live Stream ────────────────────────────────────────────────────
+        # For live streams, extract the direct stream URL using yt-dlp with cookies
         if is_live:
             cookie = self.get_cookies()
-            opts = {**self._make_ydl_opts(cookie), "format": "bestaudio/best"}
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "cookiefile": cookie,
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "socket_timeout": 20,
+                "extractor_retries": 5,
+                "sleep_interval_requests": 1,
+                # Use android client to bypass YouTube bot detection on server IPs
+                "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+            }
+
+            def _extract_url():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    try:
+                        info = ydl.extract_info(url, download=False)
+                        if not info:
+                            return None
+
+                        direct = info.get("url")
+                        if direct:
+                            return direct
+
+                        # Some live extracts provide URLs only inside formats.
+                        for fmt in info.get("formats", []):
+                            if fmt.get("acodec") != "none" and fmt.get("url"):
+                                return fmt["url"]
+
+                        return info.get("manifest_url")
+                    except yt_dlp.utils.ExtractorError as ex:
+                        error_msg = str(ex)
+                        if "not available" in error_msg.lower():
+                            logger.error(
+                                "Video format not available or region-blocked.")
+                        else:
+                            logger.error(
+                                "Live stream URL extraction failed: %s", ex)
+                        return None
+                    except yt_dlp.utils.DownloadError as ex:
+                        logger.error(
+                            "Unexpected error during live stream extraction: %s", ex)
+                        return None
+                    except Exception as ex:
+                        logger.error(
+                            "Unexpected error during live stream extraction: %s", ex)
+                        return None
+
             try:
-                result, err = await asyncio.wait_for(
-                    asyncio.to_thread(self._run_extract_url, url, opts), timeout=30
-                )
+                stream_url = await asyncio.wait_for(asyncio.to_thread(_extract_url), timeout=35)
             except asyncio.TimeoutError:
-                result, err = None, "timeout"
-            if result:
-                return result
+                logger.error("Live stream URL extraction timed out for %s", video_id)
+                return None
 
-            # Try without cookies
-            if cookie:
-                opts2 = {**self._make_ydl_opts(), "format": "bestaudio/best"}
-                try:
-                    result2, _ = await asyncio.wait_for(
-                        asyncio.to_thread(self._run_extract_url, url, opts2), timeout=25
-                    )
-                    if result2:
-                        return result2
-                except asyncio.TimeoutError:
-                    pass
+            return stream_url
 
-            asyncio.create_task(self._alert_owner(err or "live stream extract failed"))
-            return await self._invidious_live_url(video_id)
-
-        # ── Check existing cached download ─────────────────────────────────
-        existing = [f for f in glob.glob(f"downloads/{video_id}.*") if not f.endswith(".part")]
+        # Download audio/video file
+        # Don't hardcode extension - let yt-dlp choose best available format
+        # Will use outtmpl pattern to get actual extension
+        filename_pattern = f"downloads/{video_id}"
+        
+        # Check if any completed file for this video_id already exists
+        existing_files = [
+            f for f in glob.glob(f"{filename_pattern}.*")
+            if not f.endswith('.part')
+        ]
         if video:
-            for f in existing:
-                if Path(f).suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}:
-                    logger.debug(f"[YouTube] Cache hit (video): {f}")
-                    return f
+            video_candidates = [
+                f for f in existing_files
+                if Path(f).suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+            ]
+            if video_candidates:
+                return video_candidates[0]
         else:
-            for f in existing:
-                if Path(f).suffix.lower() in {".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav", ".flac"}:
-                    logger.debug(f"[YouTube] Cache hit (audio): {f}")
-                    return f
-            for f in existing:
-                if Path(f).suffix.lower() in {".mp4", ".mkv", ".mov"}:
-                    logger.debug(f"[YouTube] Cache hit (video→audio): {f}")
-                    return f
+            audio_candidates = [
+                f for f in existing_files
+                if Path(f).suffix.lower() in {".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav", ".flac"}
+            ]
+            if audio_candidates:
+                return audio_candidates[0]
 
-        Path("downloads").mkdir(parents=True, exist_ok=True)
+            # VPS caches are often dominated by mp4 due to prior /vplay usage.
+            # Reuse those files for /play (audio-only mode) to avoid redundant redownloads.
+            container_fallbacks = [
+                f for f in existing_files
+                if Path(f).suffix.lower() in {".mp4", ".mkv", ".mov"}
+            ]
+            if container_fallbacks:
+                return container_fallbacks[0]
+        
+        # Ensure downloads directory exists with write permissions
+        downloads_dir = Path("downloads")
+        if not downloads_dir.exists():
+            try:
+                downloads_dir.mkdir(parents=True, exist_ok=True)
+                logger.info("📁 Created downloads directory")
+            except Exception as e:
+                logger.error(f"❌ Cannot create downloads directory: {e}")
+                return None
 
+        # **PERFORMANCE FIX**: Use semaphore to limit concurrent downloads
+        # Prevents bandwidth saturation when 15-20 groups download simultaneously
         async with self._download_semaphore:
             cookie = self.get_cookies()
-            base = {
-                **self._make_ydl_opts(cookie),
+            base_opts = {
                 "outtmpl": "downloads/%(id)s.%(ext)s",
+                "quiet": True,
+                "noplaylist": True,
+                "geo_bypass": True,
+                "no_warnings": True,
                 "overwrites": False,
+                "nocheckcertificate": True,
                 "continuedl": True,
                 "noprogress": True,
+                # **PERFORMANCE FIX**: Reduced to 4 fragments for maximum stability
+                # 4 fragments × 5 concurrent downloads = 20 total connections (prevents bandwidth saturation)
+                # Lower = more stable but slightly slower downloads (trade-off for zero lag)
                 "concurrent_fragment_downloads": 4,
-                "http_chunk_size": 524288,
+                "http_chunk_size": 524288,  # 512KB chunks (smaller = more stable streaming)
+                "socket_timeout": 30,  # Increased from 15s (prevents timeout on slow networks)
+                "retries": 2,  # Increased from 1 (better reliability)
+                "fragment_retries": 2,  # Increased from 1 (handle network hiccups)
+                "extractor_retries": 5,
+                "sleep_interval_requests": 1,
+                # Use android client to bypass YouTube bot detection on server IPs.
+                # Android client does not require PO tokens and works from datacenter IPs.
+                "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
             }
+
             if video:
-                h = f"[height<={self._max_video_height}]" if self._max_video_height else ""
+                # Video mode: download best video/audio combo up to configured height
+                height_filter = ""
+                if self._max_video_height and self._max_video_height > 0:
+                    height_filter = f"[height<={self._max_video_height}]"
+                format_chain = (
+                    f"bestvideo[ext=mp4]{height_filter}+bestaudio[ext=m4a]/"
+                    f"bestvideo{height_filter}+bestaudio/"
+                    "bestvideo+bestaudio/best"
+                )
                 ydl_opts = {
-                    **base,
-                    "format": f"bestvideo[ext=mp4]{h}+bestaudio[ext=m4a]/bestvideo{h}+bestaudio/best",
+                    **base_opts,
+                    "format": format_chain,
                     "merge_output_format": "mp4",
-                    "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
+                    "postprocessors": [
+                        {
+                            "key": "FFmpegVideoConvertor",
+                            "preferedformat": "mp4",
+                        }
+                    ],
                 }
             else:
+                # Audio mode: favor m4a/opus for best compatibility
                 ydl_opts = {
-                    **base,
+                    **base_opts,
                     "format": "bestaudio[ext=m4a]/bestaudio[acodec=opus]/bestaudio/best",
                     "postprocessors": [],
                 }
 
-            # ── Attempt 1: with cookies ────────────────────────────────────
-            logger.info(f"[YouTube] Attempt 1 (cookie={'yes' if cookie else 'no'}): {video_id}")
-            result, err = await asyncio.to_thread(
-                self._run_download, url, ydl_opts, video_id, video
-            )
-            if result:
-                logger.info(f"[YouTube] ✅ Download OK (attempt 1): {video_id}")
-                return result
-
-            logger.warning(f"[YouTube] Attempt 1 failed [{video_id}]: {str(err)[:120]}")
-
-            # ── Attempt 2: without cookies, rotated UA ─────────────────────
-            if cookie:
-                no_cookie_opts = {
-                    **{k: v for k, v in ydl_opts.items() if k != "cookiefile"},
-                    "user_agent": self._next_ua(),
-                }
-                logger.info(f"[YouTube] Attempt 2 (no-cookie, rotated UA): {video_id}")
-                result2, err2 = await asyncio.to_thread(
-                    self._run_download, url, no_cookie_opts, video_id, video
-                )
-                if result2:
-                    logger.info(f"[YouTube] ✅ Download OK (attempt 2, no-cookie): {video_id}")
-                    return result2
-                logger.warning(f"[YouTube] Attempt 2 failed [{video_id}]: {str(err2)[:80]}")
-
-            # ── Attempt 3: tv_embedded client only (often bypasses bot check) ──
-            tv_opts = {
-                **{k: v for k, v in ydl_opts.items() if k not in ("cookiefile",)},
-                "user_agent": USER_AGENTS[2],  # Desktop Chrome
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["tv_embedded"],
-                        "player_skip": ["webpage"],
-                    }
-                },
+            ydl_opts_cookie = {
+                **ydl_opts,
+                "cookiefile": cookie,
             }
-            if cookie:
-                tv_opts["cookiefile"] = cookie
-            logger.info(f"[YouTube] Attempt 3 (tv_embedded client): {video_id}")
-            result3, err3 = await asyncio.to_thread(
-                self._run_download, url, tv_opts, video_id, video
-            )
-            if result3:
-                logger.info(f"[YouTube] ✅ Download OK (attempt 3, tv_embedded): {video_id}")
-                return result3
-            logger.warning(f"[YouTube] Attempt 3 failed [{video_id}]: {str(err3)[:80]}")
 
-            # ── All yt-dlp attempts failed → alert owner + use Invidious ──
-            first_err = err or err2 or err3 or "unknown"
-            asyncio.create_task(self._alert_owner(first_err))
+            def _download(ydl_runtime_opts):
+                ydl_instance = None
+                try:
+                    ydl_instance = yt_dlp.YoutubeDL(ydl_runtime_opts)
+                    # Extract info to get actual extension downloaded
+                    info = ydl_instance.extract_info(url, download=True)
+                    if not info:
+                        logger.error(f"❌ Failed to extract info for {video_id}")
+                        return None
+                    
+                    time.sleep(0.5)
+                    located = self._locate_download_file(video_id, video=video)
+                    if located:
+                        return located
+                    logger.error(f"❌ Download completed but file not found for: {video_id}")
+                    return None
+                except yt_dlp.utils.ExtractorError as ex:
+                    error_msg = str(ex)
+                    if "not available" in error_msg.lower():
+                        logger.error(
+                            "❌ Video not available: May be region-blocked or private.")
+                    elif "age" in error_msg.lower():
+                        logger.error(
+                            "❌ Age-restricted video: Cookies required.")
+                    else:
+                        logger.error("❌ YouTube extraction failed: %s", ex)
+                    return None
+                except yt_dlp.utils.DownloadError as ex:
+                    error_msg = str(ex)
+                    recovered = self._locate_download_file(video_id, video=video)
+                    if "unable to rename file" in error_msg.lower() and recovered:
+                        logger.warning(
+                            f"⚠️ Renaming failed for {video_id}, using recovered file {Path(recovered).name}"
+                        )
+                        return recovered
+                    if "416" in error_msg or "Requested range not satisfiable" in error_msg:
+                        # HTTP 416 - file partially downloaded, delete and retry won't help
+                        logger.warning(f"⚠️ Range error for {video_id}, skipping")
+                    else:
+                        logger.warning(f"⚠️ Download error for {video_id}: {ex}")
+                        if recovered:
+                            logger.warning(
+                                f"⚠️ Using recovered file for {video_id} despite download error"
+                            )
+                            return recovered
+                    return None
+                except Exception as ex:
+                    logger.warning(f"⚠️ Unexpected download error for {video_id}: {ex}")
+                    return None
+                finally:
+                    # CRITICAL: Explicitly close yt-dlp to release file handles
+                    if ydl_instance:
+                        try:
+                            ydl_instance.close()
+                        except Exception:
+                            pass
 
-            logger.info(f"[YouTube] Trying Invidious fallback: {video_id}")
-            inv = await (
-                self._invidious_video_url(video_id)
-                if video
-                else self._invidious_audio_url(video_id)
-            )
-            if inv:
-                logger.info(f"[YouTube] ✅ Invidious fallback success: {video_id}")
-                return inv
-
-            logger.error(f"[YouTube] ❌ All methods failed for: {video_id} | Error: {first_err[:150]}")
-            return None
+            # Single attempt with the initially selected cookie.
+            return await asyncio.to_thread(_download, ydl_opts_cookie)
