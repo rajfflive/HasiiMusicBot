@@ -103,8 +103,6 @@ class YouTube:
             return url.rstrip("/") + ".txt"
         if "paste.ee/p/" in url:
             return url.replace("paste.ee/p/", "paste.ee/r/")
-        if "me/" in url:
-            return url.replace("me/", "me/raw/")
         logger.warning(f"⚠️ Unknown paste service URL, using as-is: {url}")
         return url
 
@@ -137,16 +135,14 @@ class YouTube:
                     async with session.get(link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status != 200:
                             logger.error(f"❌ Cookie download failed: HTTP {resp.status} from {url}")
-                            logger.error(f"   Tried raw URL: {link}")
                             continue
                         content = await resp.read()
                         if not content or len(content) < 50:
-                            logger.error(f"❌ Cookie file empty or invalid from {url} (size={len(content) if content else 0})")
+                            logger.error(f"❌ Cookie file empty or invalid from {url}")
                             continue
                         content_text = content.decode("utf-8", errors="ignore")
                         if content_text.strip().startswith("<!DOCTYPE") or content_text.strip().startswith("<html"):
                             logger.error(f"❌ Got HTML page instead of cookies from {url}")
-                            logger.error(f"   Raw URL used: {link}")
                             continue
                         with open(path, "wb") as fw:
                             fw.write(content)
@@ -272,21 +268,19 @@ class YouTube:
 
             return tracks
         except KeyError:
-            raise Exception("Failed to parse playlist. YouTube may have changed their structure.")
+            raise Exception("Failed to parse playlist.")
         except Exception:
             raise
 
     async def download(self, video_id: str, is_live: bool = False, video: bool = False) -> Optional[str]:
         url = self.base + video_id
 
-        # Stale .part files delete karo — Railway restart ke baad "format not available" cause karte hain
         for stale in glob.glob(f"downloads/{video_id}*.part"):
             try:
                 os.remove(stale)
             except Exception:
                 pass
 
-        # ── Live stream ───────────────────────────────────────────────────────
         if is_live:
             cookie = self.get_cookies()
             ydl_opts: dict = {
@@ -295,9 +289,10 @@ class YouTube:
                 "format": "bestaudio/best",
                 "noplaylist": True,
                 "socket_timeout": 20,
+                "check_formats": False,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]}},
+                "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded", "ios"]}},
             }
             if cookie:
                 ydl_opts["cookiefile"] = cookie
@@ -325,7 +320,6 @@ class YouTube:
                 logger.error("Live stream URL extraction timed out for %s", video_id)
                 return None
 
-        # ── Audio / Video file download ───────────────────────────────────────
         filename_pattern = f"downloads/{video_id}"
         existing_files = [f for f in glob.glob(f"{filename_pattern}.*") if not f.endswith(".part")]
 
@@ -361,14 +355,17 @@ class YouTube:
                 "nocheckcertificate": True,
                 "continuedl": False,
                 "noprogress": True,
-                "concurrent_fragment_downloads": 4,
-                "http_chunk_size": 524288,
+                "check_formats": False,
                 "socket_timeout": 30,
-                "retries": 3,
-                "fragment_retries": 3,
+                "retries": 5,
+                "fragment_retries": 5,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]}},
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android_music", "android", "tv_embedded", "ios", "web"],
+                    }
+                },
             }
 
             if video:
@@ -407,28 +404,35 @@ class YouTube:
                         return located
                     logger.error(f"❌ Download completed but file not found for: {video_id}")
                     return None
-                except yt_dlp.utils.ExtractorError as ex:
+
+                except (yt_dlp.utils.ExtractorError, yt_dlp.utils.DownloadError) as ex:
                     error_msg = str(ex)
-                    if "not available" in error_msg.lower():
-                        logger.error("❌ Video not available: region-blocked or private.")
-                    elif "age" in error_msg.lower():
-                        logger.error("❌ Age-restricted video: cookies required.")
-                    else:
-                        logger.error("❌ YouTube extraction failed: %s", ex)
-                    return None
-                except yt_dlp.utils.DownloadError as ex:
-                    error_msg = str(ex)
+
+                    if "requested format is not available" in error_msg.lower() or "format" in error_msg.lower():
+                        logger.warning(f"⚠️ Format not available for {video_id}, retrying with 'best'...")
+                        try:
+                            if ydl_instance:
+                                ydl_instance.close()
+                                ydl_instance = None
+                            retry_opts = {**opts, "format": "best", "check_formats": False}
+                            ydl_instance = yt_dlp.YoutubeDL(retry_opts)
+                            info = ydl_instance.extract_info(url, download=True)
+                            if info:
+                                time.sleep(0.5)
+                                located = self._locate_download_file(video_id, video=video)
+                                if located:
+                                    logger.info(f"✅ Retry succeeded for {video_id}")
+                                    return located
+                        except Exception as retry_ex:
+                            logger.error(f"❌ Retry also failed for {video_id}: {retry_ex}")
+
                     recovered = self._locate_download_file(video_id, video=video)
-                    if "unable to rename file" in error_msg.lower() and recovered:
-                        logger.warning(f"⚠️ Renaming failed for {video_id}, using recovered file")
+                    if recovered:
                         return recovered
-                    if "416" in error_msg or "Requested range not satisfiable" in error_msg:
-                        logger.warning(f"⚠️ Range error for {video_id}, skipping")
-                    else:
-                        logger.warning(f"⚠️ Download error for {video_id}: {ex}")
-                        if recovered:
-                            return recovered
+
+                    logger.warning(f"⚠️ Download error for {video_id}: {ex}")
                     return None
+
                 except Exception as ex:
                     logger.warning(f"⚠️ Unexpected download error for {video_id}: {ex}")
                     return None
