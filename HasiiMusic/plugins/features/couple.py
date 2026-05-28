@@ -4,6 +4,8 @@ from pyrogram import filters, types
 from HasiiMusic import app, db
 
 
+# ─── Couple GIF IDs — replace any expired IDs with new animation file_ids ───
+# To get a new file_id: send the GIF to your bot and forward it to @RawDataBot
 COUPLE_GIFS: list[str] = [
     "CgACAgQAAxkBAAFK1VhqF95vqulflsczG8rOv5kU8xERXgACgwkAAiOHJVOi8Zepf6kaozsE",
     "CgACAgQAAxkBAAFK1VxqF96H0tlP-6zxgTkM2dPEluGXpgACGQkAAlFeXFK0i25A-56hVjsE",
