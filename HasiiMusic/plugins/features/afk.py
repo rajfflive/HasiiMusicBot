@@ -8,11 +8,10 @@ from HasiiMusic import app, db
 
 _afk_cache: dict[int, dict] = {}
 
-# ─── AFK GIFs (aapke bheje hue file_ids) ─────────────────────────────────────
 AFK_GIFS = [
-    "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",  # meryl-sleeping
-    "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",  # agleia-afk
-    "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",  # nemesis-sleeping
+    "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",
+    "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",
+    "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",
 ]
 
 
@@ -54,30 +53,28 @@ def _fmt_time(seconds: float) -> str:
         return f"{h}h {m}m"
 
 
-# ─── /afk — works in BOTH group and private ───────────────────────────────────
-
-@app.on_message(filters.command("afk"))
+# ─── /afk works in BOTH private and group ─────────────────────────────────────
+@app.on_message(filters.command("afk") & (filters.private | filters.group))
 async def afk_cmd(_, message: types.Message):
     if not message.from_user:
         return
+
+    user = message.from_user
+    chat_id = message.chat.id
+    reason = " ".join(message.command[1:]) if len(message.command) > 1 else ""
+
     try:
         await message.delete()
     except Exception:
         pass
 
-    user = message.from_user
-    reason = " ".join(message.command[1:]) if len(message.command) > 1 else ""
-    chat_id = message.chat.id
-
+    # Toggle off if already AFK
     if await _is_afk(user.id):
         await _del_afk(user.id)
-        try:
-            await app.send_message(
-                chat_id,
-                f"<blockquote>✅ {user.mention} ɪꜱ ɴᴏ ʟᴏɴɢᴇʀ ᴀꜰᴋ!</blockquote>",
-            )
-        except Exception:
-            pass
+        await app.send_message(
+            chat_id,
+            f"<blockquote>✅ {user.mention} ɪꜱ ɴᴏ ʟᴏɴɢᴇʀ ᴀꜰᴋ!</blockquote>",
+        )
         return
 
     await _set_afk(user.id, reason)
@@ -87,22 +84,25 @@ async def afk_cmd(_, message: types.Message):
         caption += f"\n📝 ʀᴇᴀꜱᴏɴ: {reason}"
     caption += "</blockquote>"
 
-    gif_id = random.choice(AFK_GIFS)
-    try:
-        await app.send_animation(chat_id, animation=gif_id, caption=caption)
-    except Exception:
+    sent = False
+    for gif_id in random.sample(AFK_GIFS, len(AFK_GIFS)):
         try:
-            await app.send_message(chat_id, caption)
+            await app.send_animation(chat_id, animation=gif_id, caption=caption)
+            sent = True
+            break
         except Exception:
-            pass
+            continue
+
+    if not sent:
+        await app.send_message(chat_id, caption)
 
 
-# ─── Auto-remove AFK when user sends any message (group only) ─────────────────
-
+# ─── Auto-remove AFK when user sends a message (group only) ───────────────────
 @app.on_message(filters.group & ~filters.service, group=10)
 async def afk_watcher(_, message: types.Message):
     if not message.from_user:
         return
+
     user = message.from_user
 
     if message.text and message.text.strip().startswith("/afk"):
