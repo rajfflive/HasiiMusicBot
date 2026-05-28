@@ -47,8 +47,8 @@ async def auto_refresh_cookies():
             yt.cookies.clear()
             yt.checked = False
             yt.warned = False
-            yt.cookies_expired = False
-            yt.last_cookie_alert = 0.0
+            yt.cookies_expired = False      # ← ab __init__ mein hai, crash nahi hoga
+            yt.last_cookie_alert = 0.0      # ← ab __init__ mein hai, crash nahi hoga
             await yt.save_cookies(config.COOKIES_URL)
             if yt.cookies:
                 await _notify(
@@ -61,8 +61,8 @@ async def auto_refresh_cookies():
                 await _notify(
                     "<blockquote><b>⚠️ Cookie Refresh Failed!</b></blockquote>\n\n"
                     "<blockquote>Cookies nahi aai.\n"
-                    "Bot Invidious fallback use karega.\n"
-                    "Fix: <code>/setcookies &lt;url&gt;</code></blockquote>"
+                    "Bot bina cookies ke try karega.\n"
+                    "Fix: <code>/scook</code> se nai cookies upload karo</blockquote>"
                 )
         except Exception as e:
             logger.error(f"Cookie refresh error: {e}")
@@ -129,7 +129,7 @@ async def main():
             f"<blockquote>"
             f"🔌 Plugins: <b>{len(all_modules) - len(failed)}/{len(all_modules)}</b>\n"
             f"🍪 Cookies: <b>{len(yt.cookies)}</b> file(s)\n"
-            f"🔄 Invidious: <b>Active (Render fallback)</b>\n"
+            f"🚂 Platform: <b>Railway</b>\n"
             f"👑 Sudo: <b>{len(app.sudoers)}</b> users\n"
             f"⏰ Cookie refresh: every <b>{COOKIE_REFRESH_HOURS}h</b>\n"
             f"🧹 Disk cleanup: every <b>{DISK_CLEANUP_HOURS}h</b>"
