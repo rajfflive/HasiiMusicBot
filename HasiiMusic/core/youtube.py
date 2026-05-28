@@ -275,14 +275,22 @@ class YouTube:
     async def download(self, video_id: str, is_live: bool = False, video: bool = False) -> Optional[str]:
         url = self.base + video_id
 
+        # Stale .part files delete karo
         for stale in glob.glob(f"downloads/{video_id}*.part"):
             try:
                 os.remove(stale)
             except Exception:
                 pass
 
+        # ── Live stream ───────────────────────────────────────────────────────
         if is_live:
             cookie = self.get_cookies()
+            # KEY FIX: cookie hai toh web client, nahi toh android
+            if cookie:
+                extractor_args = {"youtube": {"player_client": ["web", "web_creator", "tv_embedded"]}}
+            else:
+                extractor_args = {"youtube": {"player_client": ["android_music", "android", "tv_embedded", "ios"]}}
+
             ydl_opts: dict = {
                 "quiet": True,
                 "no_warnings": True,
@@ -292,7 +300,7 @@ class YouTube:
                 "check_formats": False,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                "extractor_args": {"youtube": {"player_client": ["android_music", "android", "tv_embedded", "ios"]}},
+                "extractor_args": extractor_args,
             }
             if cookie:
                 ydl_opts["cookiefile"] = cookie
@@ -320,6 +328,7 @@ class YouTube:
                 logger.error("Live stream URL extraction timed out for %s", video_id)
                 return None
 
+        # ── Cached file check ─────────────────────────────────────────────────
         filename_pattern = f"downloads/{video_id}"
         existing_files = [f for f in glob.glob(f"{filename_pattern}.*") if not f.endswith(".part")]
 
@@ -345,6 +354,14 @@ class YouTube:
 
         async with self._download_semaphore:
             cookie = self.get_cookies()
+
+            # KEY FIX: browser cookies = web client, no cookies = android client
+            # Android clients IGNORE browser cookies — web client uses them correctly
+            if cookie:
+                player_clients = ["web", "web_creator", "tv_embedded", "mweb"]
+            else:
+                player_clients = ["android_music", "android", "tv_embedded", "ios", "web"]
+
             base_opts: dict = {
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "quiet": True,
@@ -363,7 +380,7 @@ class YouTube:
                 "sleep_interval_requests": 1,
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["android_music", "android", "tv_embedded", "ios", "web"],
+                        "player_client": player_clients,
                     }
                 },
             }
@@ -408,23 +425,35 @@ class YouTube:
                 except (yt_dlp.utils.ExtractorError, yt_dlp.utils.DownloadError) as ex:
                     error_msg = str(ex)
 
+                    # Retry with simpler format + android fallback
                     if "requested format is not available" in error_msg.lower() or "format" in error_msg.lower():
-                        logger.warning(f"⚠️ Format not available for {video_id}, retrying with 'best'...")
+                        logger.warning(f"⚠️ Format not available for {video_id}, retrying with android client + best...")
                         try:
                             if ydl_instance:
                                 ydl_instance.close()
                                 ydl_instance = None
-                            retry_opts = {**opts, "format": "best", "check_formats": False}
+                            retry_opts = {
+                                **opts,
+                                "format": "best",
+                                "check_formats": False,
+                                "extractor_args": {
+                                    "youtube": {
+                                        "player_client": ["android_music", "android", "tv_embedded", "ios"],
+                                    }
+                                },
+                            }
+                            # Remove cookiefile for android retry — android ignores it anyway
+                            retry_opts.pop("cookiefile", None)
                             ydl_instance = yt_dlp.YoutubeDL(retry_opts)
                             info = ydl_instance.extract_info(url, download=True)
                             if info:
                                 time.sleep(0.5)
                                 located = self._locate_download_file(video_id, video=video)
                                 if located:
-                                    logger.info(f"✅ Retry succeeded for {video_id}")
+                                    logger.info(f"✅ Android retry succeeded for {video_id}")
                                     return located
                         except Exception as retry_ex:
-                            logger.error(f"❌ Retry also failed for {video_id}: {retry_ex}")
+                            logger.error(f"❌ Android retry also failed for {video_id}: {retry_ex}")
 
                     recovered = self._locate_download_file(video_id, video=video)
                     if recovered:
