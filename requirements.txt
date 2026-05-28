@@ -15,16 +15,16 @@
 # - py-tgcalls: Voice chat streaming library
 # - py-yt-search: YouTube search without API
 # - python-dotenv: Load environment variables from .env
-# - yt-dlp: YouTube video/audio downloader
+# - yt-dlp: YouTube video/audio downloader (always latest from git)
 # ==============================================================================
 
-aiohttp~=3.13.5
-kurigram~=2.2.22
-pillow~=12.2.0
-psutil~=7.2.2
-pymongo~=4.17.0
-pytgcrypto~=1.2.12
-py-tgcalls~=2.2.11
-py-yt-search~=0.6.2
-python-dotenv~=1.2.2
+aiohttp>=3.9.0
+kurigram>=2.2.22
+pillow>=10.0.0
+psutil>=5.9.0
+pymongo>=4.6.0
+pytgcrypto>=1.2.12
+py-tgcalls>=2.2.11
+py-yt-search>=0.6.2
+python-dotenv>=1.0.0
 yt-dlp[default] @ git+https://github.com/yt-dlp/yt-dlp.git
