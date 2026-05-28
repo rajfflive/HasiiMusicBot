@@ -26,6 +26,8 @@ class YouTube:
         self.cookies = []
         self.checked = False
         self.warned = False
+        self.cookies_expired = False       # ← FIX 1: missing tha, AttributeError aata tha
+        self.last_cookie_alert = 0.0       # ← FIX 1: missing tha, AttributeError aata tha
 
         self.regex = re.compile(
             r"(https?://)?(www\.|m\.|music\.)?"
@@ -64,6 +66,45 @@ class YouTube:
                 return path
         return None
 
+    def _to_raw_url(self, url: str) -> str:
+        # ← FIX 2: Batbin/Hastebin/Rentry sab support — pehle sirf pastebin kaam karta tha
+        if "/raw/" in url or url.endswith("/raw"):
+            return url
+        if "pastebin.com/" in url:
+            parts = url.split("pastebin.com/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://pastebin.com/raw/{slug}"
+        if "batbin.de/" in url:
+            parts = url.split("batbin.de/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://batbin.de/raw/{slug}"
+        if "hastebin.com/" in url:
+            parts = url.split("hastebin.com/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://hastebin.com/raw/{slug}"
+        if "hastebin.sk/" in url:
+            parts = url.split("hastebin.sk/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://hastebin.sk/raw/{slug}"
+        if "rentry.co/" in url:
+            parts = url.split("rentry.co/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://rentry.co/raw/{slug}"
+        if "rentry.org/" in url:
+            parts = url.split("rentry.org/")
+            slug = parts[1].strip("/").split("/")[0]
+            return f"https://rentry.org/raw/{slug}"
+        if "ghostbin.com/paste/" in url:
+            return url.rstrip("/") + "/raw"
+        if "mystb.in/" in url and not url.endswith(".txt"):
+            return url.rstrip("/") + ".txt"
+        if "paste.ee/p/" in url:
+            return url.replace("paste.ee/p/", "paste.ee/r/")
+        if "me/" in url:
+            return url.replace("me/", "me/raw/")
+        logger.warning(f"⚠️ Unknown paste service URL, using as-is: {url}")
+        return url
+
     def get_cookies(self) -> Optional[str]:
         if not self.checked:
             cookie_dir = "HasiiMusic/cookies"
@@ -87,15 +128,23 @@ class YouTube:
         for url in urls:
             try:
                 path = f"HasiiMusic/cookies/cookie{random.randint(10000, 99999)}.txt"
-                link = url.replace("me/", "me/raw/")
+                link = self._to_raw_url(url)   # ← FIX 2: smart conversion
+                logger.info(f"🔗 Fetching cookie from: {link}")
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(link) as resp:
+                    async with session.get(link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status != 200:
                             logger.error(f"❌ Cookie download failed: HTTP {resp.status} from {url}")
+                            logger.error(f"   Tried raw URL: {link}")
                             continue
                         content = await resp.read()
                         if not content or len(content) < 50:
-                            logger.error(f"❌ Cookie file empty or invalid from {url}")
+                            logger.error(f"❌ Cookie file empty or invalid from {url} (size={len(content) if content else 0})")
+                            continue
+                        # ← FIX 3: HTML page detect karo
+                        content_text = content.decode("utf-8", errors="ignore")
+                        if content_text.strip().startswith("<!DOCTYPE") or content_text.strip().startswith("<html"):
+                            logger.error(f"❌ Got HTML page instead of cookies from {url}")
+                            logger.error(f"   Raw URL used: {link}")
                             continue
                         with open(path, "wb") as fw:
                             fw.write(content)
@@ -112,7 +161,7 @@ class YouTube:
         if saved_count > 0:
             logger.info(f"✅ Cookies saved. ({saved_count} file(s))")
         else:
-            logger.error("❌ No cookies saved! Check COOKIE_URL in .env.")
+            logger.error("❌ No cookies saved! Check COOKIE_URL in Railway env vars.")
 
     def valid(self, url: str) -> bool:
         return bool(re.match(self.regex, url))
@@ -228,7 +277,6 @@ class YouTube:
     async def download(self, video_id: str, is_live: bool = False, video: bool = False) -> Optional[str]:
         url = self.base + video_id
 
-        # ── Live stream ───────────────────────────────────────────────────────
         if is_live:
             cookie = self.get_cookies()
             ydl_opts: dict = {
@@ -239,7 +287,6 @@ class YouTube:
                 "socket_timeout": 20,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                # tv_embedded bypasses bot detection + PO token requirement
                 "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]}},
             }
             if cookie:
@@ -268,7 +315,6 @@ class YouTube:
                 logger.error("Live stream URL extraction timed out for %s", video_id)
                 return None
 
-        # ── Audio / Video file download ───────────────────────────────────────
         filename_pattern = f"downloads/{video_id}"
         existing_files = [f for f in glob.glob(f"{filename_pattern}.*") if not f.endswith(".part")]
 
@@ -311,8 +357,6 @@ class YouTube:
                 "fragment_retries": 3,
                 "extractor_retries": 5,
                 "sleep_interval_requests": 1,
-                # FIX: tv_embedded → no PO token needed, works from datacenter IPs
-                # ios → most reliable mobile client, minimal restrictions
                 "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]}},
             }
 
@@ -329,8 +373,6 @@ class YouTube:
                     "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
                 }
             else:
-                # FIX: Simple "bestaudio/best" — works for ALL videos
-                # Old "bestaudio[ext=m4a]/..." failed when m4a format unavailable
                 ydl_opts = {
                     **base_opts,
                     "format": "bestaudio/best",
