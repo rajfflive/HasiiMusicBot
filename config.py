@@ -56,8 +56,6 @@ class Config:
         # ── MODERATION ────────────────────────────────────────────────
         self.EXCLUDED_USERNAMES: List[str] = getenv("EXCLUDED_USERNAMES", "").split()
 
-    # ── Parsers ───────────────────────────────────────────────────────────────
-
     def _parse_video_height(self) -> int:
         raw = getenv("VIDEO_MAX_HEIGHT", "1080")
         try:
@@ -80,11 +78,6 @@ class Config:
         return result
 
     def _parse_cookies(self) -> List[str]:
-        """
-        Parse YouTube cookie URLs from COOKIE_URL env var.
-        Multiple URLs supported — space separated.
-        Accepts any valid http/https URL.
-        """
         cookie_str = getenv("COOKIE_URL", "")
         if not cookie_str:
             return []
@@ -97,8 +90,6 @@ class Config:
     @staticmethod
     def _str_to_bool(value: str) -> bool:
         return value.lower() in ("true", "1", "yes", "y", "on")
-
-    # ── Validation ────────────────────────────────────────────────────────────
 
     def check(self) -> None:
         required = {
@@ -117,7 +108,7 @@ class Config:
         if missing:
             raise SystemExit(
                 f"❌ Missing env variables: {', '.join(missing)}\n"
-                f"Please set them in Render environment variables."
+                f"Please set them in Railway environment variables."  # ← FIX: Render → Railway
             )
 
 
