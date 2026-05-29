@@ -1,156 +1,161 @@
-import random
+"""
+AFK Plugin for HasiiMusicBot
+Commands:
+  /afk [reason]  - Go AFK (optionally with a reason)
+  /back          - Manually come back from AFK (also auto-triggers on any message)
+
+When an AFK user is mentioned/replied-to, bot notifies with how long they've been AFK.
+AFK GIFs auto-rotate on /afk command.
+"""
+
 import time
+from datetime import timedelta
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pymongo import MongoClient as PyMongoClient
 
-from pyrogram import filters, types
-from HasiiMusic import app, db
-
-
-_afk_cache: dict[int, bool] = {}
-
-# ─── AFK GIF IDs — replace any expired IDs with new animation file_ids ──────
-# To get a new file_id: send the GIF to your bot and forward it to @RawDataBot
-AFK_GIFS: list[str] = [
-    "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",
-    "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",
-    "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",
+# ─── AFK GIF FILE IDs ────────────────────────────────────────────────────────
+AFK_GIFS = [
+    "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",  # meryl-sleeping
+    "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",  # agleia-afk
+    "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",  # nemesis-sleeping
 ]
 
+# ─── DB ──────────────────────────────────────────────────────────────────────
+try:
+    from HasiiMusic.core.mongo import mongodb as db
+except ImportError:
+    import os
+    _client = PyMongoClient(os.getenv("MONGO_DB_URI", "mongodb://localhost:27017"))
+    db = _client["HasiiMusicBot"]
 
-async def _set_afk(user_id: int, reason: str):
-    data = {"reason": reason, "since": time.time()}
-    _afk_cache[user_id] = data
-    await db.mongo.HasiiTune.afk.update_one(
+afk_col = db["afk_users"]
+
+
+def _time_fmt(seconds: int) -> str:
+    """Convert seconds to human-readable duration."""
+    td = timedelta(seconds=seconds)
+    days = td.days
+    hours, rem = divmod(td.seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def is_afk(user_id: int) -> dict | None:
+    return afk_col.find_one({"user_id": user_id})
+
+
+def set_afk(user_id: int, reason: str):
+    afk_col.update_one(
         {"user_id": user_id},
-        {"$set": {"user_id": user_id, **data}},
+        {"$set": {"reason": reason, "since": int(time.time())}},
         upsert=True,
     )
 
 
-async def _del_afk(user_id: int):
-    _afk_cache.pop(user_id, None)
-    await db.mongo.HasiiTune.afk.delete_one({"user_id": user_id})
+def clear_afk(user_id: int):
+    afk_col.delete_one({"user_id": user_id})
 
 
-async def _is_afk(user_id: int) -> dict | None:
-    if user_id in _afk_cache:
-        return _afk_cache[user_id]
-    doc = await db.mongo.HasiiTune.afk.find_one({"user_id": user_id})
-    if doc:
-        entry = {"reason": doc.get("reason", ""), "since": doc.get("since", time.time())}
-        _afk_cache[user_id] = entry
-        return entry
-    return None
+# ─── /afk ────────────────────────────────────────────────────────────────────
+import random
 
+@Client.on_message(filters.command("afk") & (filters.group | filters.private))
+async def afk_cmd(client: Client, message: Message):
+    user = message.from_user
+    reason = " ".join(message.command[1:]) if len(message.command) > 1 else "No reason given."
+    set_afk(user.id, reason)
 
-def _fmt_time(seconds: float) -> str:
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    elif seconds < 3600:
-        return f"{seconds // 60}m {seconds % 60}s"
+    gif = random.choice(AFK_GIFS)
+    caption = (
+        f"😴 {user.mention} is now **AFK**!\n"
+        f"**Reason:** {reason}"
+    )
+
+    if message.chat.type.value == "private":
+        await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
     else:
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        return f"{h}h {m}m"
+        await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
 
 
-@app.on_message(filters.command("afk") & (filters.private | filters.group))
-async def afk_cmd(_, message: types.Message):
+# ─── /back (manual return) ───────────────────────────────────────────────────
+@Client.on_message(filters.command("back") & (filters.group | filters.private))
+async def back_cmd(client: Client, message: Message):
+    user = message.from_user
+    doc = is_afk(user.id)
+    if not doc:
+        return await message.reply("You are not AFK right now.")
+
+    duration = _time_fmt(int(time.time()) - doc["since"])
+    clear_afk(user.id)
+    await message.reply(
+        f"✅ Welcome back, {user.mention}!\n"
+        f"You were AFK for **{duration}**.",
+        parse_mode="html",
+    )
+
+
+# ─── Auto-return when AFK user sends a message ───────────────────────────────
+@Client.on_message(
+    filters.group & ~filters.bot & ~filters.command(["afk"])
+)
+async def auto_back(client: Client, message: Message):
     if not message.from_user:
         return
-
     user = message.from_user
-    chat_id = message.chat.id
-    reason = " ".join(message.command[1:]) if len(message.command) > 1 else ""
-
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    if await _is_afk(user.id):
-        await _del_afk(user.id)
-        await app.send_message(
-            chat_id,
-            f"<blockquote>✅ {user.mention} ɪꜱ ɴᴏ ʟᴏɴɢᴇʀ ᴀꜰᴋ!</blockquote>",
+    doc = is_afk(user.id)
+    if doc:
+        duration = _time_fmt(int(time.time()) - doc["since"])
+        clear_afk(user.id)
+        await message.reply(
+            f"✅ Welcome back, {user.mention}! You were AFK for **{duration}**.",
+            parse_mode="html",
         )
-        return
-
-    await _set_afk(user.id, reason)
-
-    caption = f"<blockquote>😴 {user.mention} ɪꜱ ɴᴏᴡ ᴀꜰᴋ"
-    if reason:
-        caption += f"\n📝 ʀᴇᴀꜱᴏɴ: {reason}"
-    caption += "</blockquote>"
-
-    gif_sent = False
-    if AFK_GIFS:
-        for gif_id in random.sample(AFK_GIFS, len(AFK_GIFS)):
-            try:
-                await app.send_animation(chat_id, gif_id, caption=caption)
-                gif_sent = True
-                break
-            except Exception:
-                continue
-
-    if not gif_sent:
-        await app.send_message(chat_id, caption)
 
 
-@app.on_message(filters.group & ~filters.service, group=10)
-async def afk_watcher(_, message: types.Message):
-    if not message.from_user:
-        return
+# ─── Notify when AFK user is mentioned or replied to ─────────────────────────
+@Client.on_message(filters.group & ~filters.bot)
+async def mention_check(client: Client, message: Message):
+    targets = []
 
-    user = message.from_user
+    # Check reply-to
+    if message.reply_to_message and message.reply_to_message.from_user:
+        targets.append(message.reply_to_message.from_user)
 
-    if message.text and message.text.strip().startswith("/afk"):
-        return
-
-    afk_data = await _is_afk(user.id)
-    if afk_data:
-        gone = time.time() - afk_data.get("since", time.time())
-        await _del_afk(user.id)
-        try:
-            await message.reply_text(
-                f"<blockquote>👋 {user.mention} ɪꜱ ʙᴀᴄᴋ!\n"
-                f"⏱️ ᴡᴀꜱ ᴀᴡᴀʏ ꜰᴏʀ: {_fmt_time(gone)}</blockquote>",
-                disable_notification=True,
-            )
-        except Exception:
-            pass
-        return
-
-    mentioned_ids: list[int] = []
+    # Check text mentions (HTML/markdown @username or tg-mention)
     if message.entities:
         for ent in message.entities:
-            if ent.type.name == "MENTION" and message.text:
-                uname = message.text[ent.offset + 1 : ent.offset + ent.length]
-                try:
-                    u = await app.get_users(uname)
-                    mentioned_ids.append(u.id)
-                except Exception:
-                    pass
-            elif ent.type.name == "TEXT_MENTION" and ent.user:
-                mentioned_ids.append(ent.user.id)
+            if ent.type.value in ("mention", "text_mention"):
+                if ent.user:
+                    targets.append(ent.user)
+                elif message.text:
+                    # @username — resolve
+                    username = message.text[ent.offset + 1 : ent.offset + ent.length]
+                    try:
+                        u = await client.get_users(username)
+                        targets.append(u)
+                    except Exception:
+                        pass
 
-    if message.reply_to_message and message.reply_to_message.from_user:
-        mentioned_ids.append(message.reply_to_message.from_user.id)
-
-    for uid in set(mentioned_ids):
-        if uid == user.id:
+    for target in targets:
+        if not target or target.id == message.from_user.id:
             continue
-        afk_info = await _is_afk(uid)
-        if not afk_info:
-            continue
-        gone = time.time() - afk_info.get("since", time.time())
-        try:
-            u = await app.get_users(uid)
-            reason_line = f"\n📝 ʀᴇᴀꜱᴏɴ: {afk_info['reason']}" if afk_info.get("reason") else ""
-            await message.reply_text(
-                f"<blockquote>😴 {u.mention} ɪꜱ ᴀꜰᴋ ʀɪɢʜᴛ ɴᴏᴡ{reason_line}\n"
-                f"⏱️ ᴀᴡᴀʏ ꜰᴏʀ: {_fmt_time(gone)}</blockquote>",
-                disable_notification=True,
+        doc = is_afk(target.id)
+        if doc:
+            duration = _time_fmt(int(time.time()) - doc["since"])
+            reason = doc.get("reason", "No reason given.")
+            await message.reply(
+                f"⚠️ {target.mention} is **AFK** right now!\n"
+                f"**Reason:** {reason}\n"
+                f"**Since:** {duration} ago",
+                parse_mode="html",
             )
-        except Exception:
-            pass
