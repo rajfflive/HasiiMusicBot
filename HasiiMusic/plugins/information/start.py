@@ -11,17 +11,16 @@ GIF Management (owner/sudo only — private chat):
 
 from pyrogram import enums, errors, filters, types
 
-from HasiiMusic import app, config, db
+from HasiiMusic import app, config, db, lang
 from HasiiMusic.helpers import buttons, utils
 from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
-from HasiiMusic.lang import language
 
 # ─── Register GIF management commands ────────────────────────────────────────
 register_gif_commands(app, "start", "start")
 
 
 @app.on_message(filters.command(["help"]) & filters.private & ~app.bl_users)
-@language()
+@lang.language()
 async def _help(_, m: types.Message):
     try:
         await m.delete()
@@ -43,7 +42,7 @@ async def _help(_, m: types.Message):
 
 
 @app.on_message(filters.command(["start"]))
-@language()
+@lang.language()
 async def start(_, message: types.Message):
     if message.chat.type != enums.ChatType.PRIVATE:
         try:
@@ -107,7 +106,7 @@ async def start(_, message: types.Message):
 
 
 @app.on_message(filters.command(["playmode", "settings"]) & filters.group & ~app.bl_users)
-@language()
+@lang.language()
 async def settings(_, message: types.Message):
     try:
         await message.delete()
@@ -123,7 +122,7 @@ async def settings(_, message: types.Message):
 
 
 @app.on_message(filters.new_chat_members, group=7)
-@language()
+@lang.language()
 async def _new_member(_, message: types.Message):
     if message.chat.type != enums.ChatType.SUPERGROUP:
         return await message.chat.leave()
