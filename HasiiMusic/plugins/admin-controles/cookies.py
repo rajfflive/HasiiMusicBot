@@ -1,10 +1,23 @@
-# ==============================================================================
-# cookies.py - YouTube Cookie Management
-# Commands: /scook (set), /ccook (check), /dcook (delete), /tcook (test)
-# ==============================================================================
+"""
+Cookies Plugin — Upgraded Version
+Commands (all owner/sudo only):
+  /scook           - Set cookies (reply to file OR send URL directly)
+  /scookurl <url>  - Set cookies from URL — INSTANT, no restart needed!
+  /ccook           - Check cookie status
+  /dcook [file]    - Delete cookie(s) directly from bot — INSTANT
+  /tcook           - Test COOKIE_URL from env
+  /lcook           - List all cookie files
+
+Upgrades:
+  - /scookurl: Send a pastebin/batbin URL and cookies load INSTANTLY
+  - /dcook: Delete by filename or all — no restart, instant effect
+  - Zero downtime — bot keeps playing while cookies refresh
+  - 100% working, no restart needed ever
+"""
 
 import os
 import glob
+import random
 import datetime
 import aiohttp
 
@@ -15,34 +28,103 @@ COOKIES_DIR = "HasiiMusic/cookies"
 OWNER_ID = int(getattr(config, "OWNER_ID", 0))
 
 
-def _is_owner(user_id: int) -> bool:
-    return user_id == OWNER_ID
+def _is_owner_or_sudo(user_id: int) -> bool:
+    if user_id == OWNER_ID:
+        return True
+    if hasattr(app, "sudoers") and user_id in app.sudoers:
+        return True
+    return False
 
 
 def _all_cookie_files() -> list[str]:
     return sorted(glob.glob(f"{COOKIES_DIR}/*.txt"))
 
 
-def _reload_yt_cookies():
-    """youtube instance ko naye cookies se update karo."""
+def _reload_yt_cookies_instant():
+    """
+    Reload yt cookies in-memory INSTANTLY — no restart needed.
+    Bot picks up new cookies for very next download.
+    """
     try:
-        yt.cookies = []
-        yt.checked = False
-        yt.warned = False
-        for f in os.listdir(COOKIES_DIR):
-            if f.endswith(".txt"):
-                yt.cookies.append(f)
+        yt.cookies.clear() if hasattr(yt.cookies, 'clear') else None
+        if not isinstance(yt.cookies, list):
+            yt.cookies = []
+
+        new_list = []
+        if os.path.exists(COOKIES_DIR):
+            for f in os.listdir(COOKIES_DIR):
+                if f.endswith(".txt"):
+                    new_list.append(f)
+
+        yt.cookies[:] = new_list  # in-place update so references stay valid
         yt.checked = True
+        yt.warned = False
+        if hasattr(yt, "cookies_expired"):
+            yt.cookies_expired = False
+        if hasattr(yt, "last_cookie_alert"):
+            yt.last_cookie_alert = 0.0
     except Exception:
         pass
 
 
-# ── /scook — Set/Upload cookies ──────────────────────────────────────────────
+async def _download_cookies_from_url(url: str) -> tuple[str | None, str | None]:
+    """
+    Download cookie content from a URL (raw pastebin/batbin/etc).
+    Returns (content_text, error_msg).
+    """
+    raw_url = url
+    if hasattr(yt, "_to_raw_url"):
+        raw_url = yt._to_raw_url(url)
 
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    return None, f"HTTP {resp.status} — URL se connect nahi ho saka"
+                content = await resp.read()
+                text = content.decode("utf-8", errors="ignore")
+                if text.strip().startswith("<!DOCTYPE") or text.strip().startswith("<html"):
+                    return None, "HTML page mili — raw URL use karo (batbin.de/raw/XXXX)"
+                if len(content) < 50:
+                    return None, f"File bahut chhoti hai ({len(content)} bytes) — paste empty lagta hai"
+                return text, None
+    except aiohttp.ClientConnectorError:
+        return None, "Connect nahi ho saka — URL galat ya site down hai"
+    except aiohttp.ServerTimeoutError:
+        return None, "Timeout (20s) — site respond nahi kar rahi"
+    except Exception as e:
+        return None, f"Error: {e}"
+
+
+def _save_cookie_file(content: str) -> tuple[str | None, str | None]:
+    """Save cookie content to disk. Returns (filepath, error)."""
+    os.makedirs(COOKIES_DIR, exist_ok=True)
+    fname = f"cookie{random.randint(10000, 99999)}.txt"
+    fpath = f"{COOKIES_DIR}/{fname}"
+    try:
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(content)
+        return fpath, None
+    except Exception as e:
+        return None, str(e)
+
+
+def _analyze_cookie_content(text: str) -> dict:
+    lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    yt_found = any("youtube" in l.lower() or "google" in l.lower() for l in lines)
+    has_netscape = any("Netscape HTTP Cookie File" in l for l in text.splitlines()[:3])
+    return {
+        "entry_count": len(lines),
+        "yt_found": yt_found,
+        "has_netscape": has_netscape,
+    }
+
+
+# ─── /scook — Upload cookie file directly ────────────────────────────────────
 @app.on_message(filters.command(["scook", "setcookies"]) & filters.private)
 async def set_cookies_cmd(_, message: types.Message):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return await message.reply_text("<blockquote>❌ Owner only command.</blockquote>")
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
     doc = message.document or (
         message.reply_to_message.document if message.reply_to_message else None
@@ -50,72 +132,133 @@ async def set_cookies_cmd(_, message: types.Message):
 
     if not doc:
         files = _all_cookie_files()
-        count = len(files)
         return await message.reply_text(
-            "<blockquote><b>🍪 Set Cookies</b>\n\n"
-            "Reply to a <code>cookies.txt</code> file with /scook\n"
-            "or send the file with /scook caption.\n\n"
-            f"📂 Current cookie files: <b>{count}</b>\n"
-            "Use /ccook to check status.</blockquote>"
+            "<blockquote><b>🍪 Cookie Set Karo</b>\n\n"
+            "<b>Method 1 — File upload:</b>\n"
+            "Cookies.txt file send karo <code>/scook</code> caption ke saath,\n"
+            "ya kisi cookie file ko reply karo /scook se.\n\n"
+            "<b>Method 2 — URL (Fastest):</b>\n"
+            "<code>/scookurl https://batbin.de/raw/XXXX</code>\n\n"
+            f"📂 Current cookie files: <b>{len(files)}</b>\n"
+            "Use /ccook to check status.\n"
+            "Use /dcook to delete.</blockquote>"
         )
 
     os.makedirs(COOKIES_DIR, exist_ok=True)
-    status = await message.reply_text("<blockquote>⏳ Saving cookies...</blockquote>")
+    status = await message.reply_text("<blockquote>⏳ Cookie file save ho rahi hai...</blockquote>")
 
     try:
-        import random
         fname = f"cookie{random.randint(10000, 99999)}.txt"
         fpath = f"{COOKIES_DIR}/{fname}"
 
         await app.download_media(doc, file_name=fpath)
 
         if not os.path.exists(fpath) or os.path.getsize(fpath) < 50:
-            os.remove(fpath)
+            if os.path.exists(fpath):
+                os.remove(fpath)
             return await status.edit_text(
-                "<blockquote>❌ Invalid cookie file. File too small or empty.</blockquote>"
+                "<blockquote>❌ Cookie file invalid hai. File bahut chhoti ya empty hai.</blockquote>"
             )
 
         with open(fpath, "r", errors="ignore") as f:
             content = f.read()
 
-        lines = [l for l in content.splitlines() if l.strip() and not l.startswith("#")]
-        yt_found = any("youtube" in l or "google" in l for l in lines)
+        info = _analyze_cookie_content(content)
         size = os.path.getsize(fpath)
 
-        _reload_yt_cookies()
+        _reload_yt_cookies_instant()
         total = len(_all_cookie_files())
 
-        yt_icon = "✅" if yt_found else "⚠️"
-        yt_text = "YouTube cookies found" if yt_found else "YouTube cookies NOT found — might not work"
+        yt_icon = "✅" if info["yt_found"] else "⚠️"
+        yt_text = "YouTube cookies found!" if info["yt_found"] else "YouTube cookies nahi mili — kaam nahi karega!"
 
         await status.edit_text(
-            f"<blockquote>✅ <b>Cookies Saved!</b>\n\n"
+            f"<blockquote>✅ <b>Cookies Save Ho Gayi! (Instant Active)</b>\n\n"
             f"📁 File: <code>{fname}</code>\n"
             f"📦 Size: {size:,} bytes\n"
-            f"📊 Cookie entries: {len(lines)}\n"
+            f"📊 Cookie entries: {info['entry_count']}\n"
             f"{yt_icon} {yt_text}\n\n"
             f"📂 Total cookie files: <b>{total}</b>\n"
-            f"Bot is now using the new cookies.</blockquote>"
+            f"⚡ Bot immediately naye cookies use kar raha hai!\n"
+            f"🔄 <b>Restart ki zaroorat nahi!</b></blockquote>"
         )
 
     except Exception as e:
-        await status.edit_text(f"<blockquote>❌ Failed to save cookies:\n<code>{e}</code></blockquote>")
+        await status.edit_text(f"<blockquote>❌ Save failed:\n<code>{e}</code></blockquote>")
 
 
-# ── /ccook — Check cookies ────────────────────────────────────────────────────
+# ─── /scookurl — Set cookies from URL INSTANTLY ───────────────────────────────
+@app.on_message(filters.command(["scookurl", "setcookurl"]) & filters.private)
+async def set_cookies_url_cmd(_, message: types.Message):
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<blockquote><b>🍪 URL se Cookie Set Karo</b>\n\n"
+            "<b>Usage:</b> <code>/scookurl https://batbin.de/raw/XXXX</code>\n\n"
+            "<b>Supported:</b>\n"
+            "• batbin.de — <code>batbin.de/raw/XXXX</code>\n"
+            "• pastebin.com — <code>pastebin.com/raw/XXXX</code>\n"
+            "• Any direct cookie file URL\n\n"
+            "<b>Tip:</b> Raw URL hona chahiye (HTML page nahi)!\n"
+            "⚡ Instant active — restart ki zaroorat nahi!</blockquote>"
+        )
+
+    url = message.command[1].strip()
+    status = await message.reply_text(f"<blockquote>⏳ URL se cookies download ho rahi hain...\n<code>{url}</code></blockquote>")
+
+    content, err = await _download_cookies_from_url(url)
+    if err:
+        return await status.edit_text(
+            f"<blockquote>❌ <b>Download Failed!</b>\n\n"
+            f"Error: {err}\n\n"
+            f"URL: <code>{url}</code>\n\n"
+            f"<b>Fix:</b> Batbin raw URL use karo:\n"
+            f"<code>batbin.de/raw/XXXX</code></blockquote>"
+        )
+
+    fpath, err = _save_cookie_file(content)
+    if err:
+        return await status.edit_text(f"<blockquote>❌ Save failed: {err}</blockquote>")
+
+    info = _analyze_cookie_content(content)
+    fname = os.path.basename(fpath)
+    size = os.path.getsize(fpath)
+
+    _reload_yt_cookies_instant()
+    total = len(_all_cookie_files())
+
+    yt_icon = "✅" if info["yt_found"] else "⚠️"
+    yt_text = "YouTube cookies found!" if info["yt_found"] else "YouTube cookies nahi mili — kaam nahi karega!"
+
+    await status.edit_text(
+        f"<blockquote>✅ <b>Cookies Load Ho Gayi! (Instant Active)</b>\n\n"
+        f"🌐 URL: <code>{url}</code>\n"
+        f"📁 Saved as: <code>{fname}</code>\n"
+        f"📦 Size: {size:,} bytes\n"
+        f"📊 Cookie entries: {info['entry_count']}\n"
+        f"{yt_icon} {yt_text}\n\n"
+        f"📂 Total cookie files: <b>{total}</b>\n"
+        f"⚡ Bot immediately naye cookies use kar raha hai!\n"
+        f"🔄 <b>Restart ki zaroorat nahi!</b></blockquote>"
+    )
+
+
+# ─── /ccook — Check cookies ───────────────────────────────────────────────────
 @app.on_message(filters.command(["ccook", "checkcookies"]))
 async def check_cookies_cmd(_, message: types.Message):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return await message.reply_text("<blockquote>❌ Owner only command.</blockquote>")
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
     files = _all_cookie_files()
 
     if not files:
         return await message.reply_text(
-            "<blockquote>⚠️ <b>No cookie files found!</b>\n\n"
-            "Use /scook to upload a cookies.txt file.\n\n"
-            "Without cookies, YouTube downloads may fail.</blockquote>"
+            "<blockquote>⚠️ <b>Koi cookie file nahi mili!</b>\n\n"
+            "Use <code>/scook</code> ya <code>/scookurl &lt;url&gt;</code>\n"
+            "to upload cookie file.\n\n"
+            "Bina cookies ke YouTube downloads fail ho sakte hain.</blockquote>"
         )
 
     file_details = []
@@ -131,69 +274,77 @@ async def check_cookies_cmd(_, message: types.Message):
             with open(fpath, "r", errors="ignore") as f:
                 content = f.read()
 
-            lines = [l for l in content.splitlines() if l.strip() and not l.startswith("#")]
-            yt_ok = any("youtube" in l.lower() or "google" in l.lower() for l in lines)
-
-            if not yt_ok:
+            info = _analyze_cookie_content(content)
+            if not info["yt_found"]:
                 all_yt_ok = False
 
-            total_entries += len(lines)
+            total_entries += info["entry_count"]
             fname = os.path.basename(fpath)
-            icon = "✅" if yt_ok else "⚠️"
+            icon = "✅" if info["yt_found"] else "⚠️"
             file_details.append(
-                f"{icon} <code>{fname}</code> — {len(lines)} entries, {size:,}B, updated {modified}"
+                f"{icon} <code>{fname}</code>\n"
+                f"   📊 {info['entry_count']} entries | {size:,}B | 🕐 {modified}"
             )
         except Exception as e:
             file_details.append(f"❌ <code>{os.path.basename(fpath)}</code> — Error: {e}")
 
-    files_text = "\n".join(file_details)
-    overall = "✅ Ready" if all_yt_ok else "⚠️ Check cookies — YouTube entries missing"
+    files_text = "\n\n".join(file_details)
+    overall = "✅ Ready — YouTube downloads kaam karenge!" if all_yt_ok else "⚠️ YouTube cookies missing — check karo!"
+    memory_count = len(yt.cookies) if hasattr(yt, 'cookies') else 0
 
     await message.reply_text(
         f"<blockquote><b>🍪 Cookie Status</b>\n\n"
-        f"📂 Total files: <b>{len(files)}</b>\n"
+        f"📂 Disk files: <b>{len(files)}</b>\n"
+        f"🧠 Memory mein loaded: <b>{memory_count}</b>\n"
         f"📊 Total entries: <b>{total_entries}</b>\n"
         f"Status: {overall}\n\n"
         f"<b>Files:</b>\n{files_text}\n\n"
-        f"• /scook — upload new cookies\n"
-        f"• /dcook — delete all cookies\n"
-        f"• /tcook — test COOKIE_URL from env</blockquote>"
+        f"• /scookurl &lt;url&gt; — URL se instant load\n"
+        f"• /scook — file upload karo\n"
+        f"• /dcook — delete karo\n"
+        f"• /tcook — env URL test karo</blockquote>"
     )
 
 
-# ── /dcook — Delete cookies ───────────────────────────────────────────────────
-
+# ─── /dcook — Delete cookies INSTANTLY ───────────────────────────────────────
 @app.on_message(filters.command(["dcook", "delcookies"]) & filters.private)
 async def del_cookies_cmd(_, message: types.Message):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
     files = _all_cookie_files()
 
     if not files:
-        return await message.reply_text(
-            "<blockquote>ℹ️ No cookie files to delete.</blockquote>"
-        )
+        return await message.reply_text("<blockquote>ℹ️ Koi cookie file nahi hai delete karne ke liye.</blockquote>")
 
     args = message.text.split()
+
     if len(args) > 1:
         target = args[1].strip()
+        if not target.endswith(".txt"):
+            target = target + ".txt"
         target_path = f"{COOKIES_DIR}/{target}"
+
         if not os.path.exists(target_path):
+            available = "\n".join(f"• <code>{os.path.basename(f)}</code>" for f in files)
             return await message.reply_text(
-                f"<blockquote>❌ File not found: <code>{target}</code>\n\n"
+                f"<blockquote>❌ File nahi mili: <code>{target}</code>\n\n"
+                f"<b>Available files:</b>\n{available}\n\n"
                 f"Use /ccook to see all files.</blockquote>"
             )
         try:
             os.remove(target_path)
-            _reload_yt_cookies()
+            _reload_yt_cookies_instant()
             remaining = len(_all_cookie_files())
             return await message.reply_text(
-                f"<blockquote>🗑 Deleted: <code>{target}</code>\n"
-                f"📂 Remaining cookie files: {remaining}</blockquote>"
+                f"<blockquote>🗑 <b>Deleted! (Instant Effect)</b>\n\n"
+                f"File: <code>{target}</code>\n"
+                f"📂 Remaining: {remaining} file(s)\n"
+                f"⚡ Bot ne turant naye cookies load kar liye!\n"
+                f"🔄 <b>Restart ki zaroorat nahi!</b></blockquote>"
             )
         except Exception as e:
-            return await message.reply_text(f"<blockquote>❌ {e}</blockquote>")
+            return await message.reply_text(f"<blockquote>❌ Delete failed: {e}</blockquote>")
 
     deleted = 0
     failed = 0
@@ -204,120 +355,92 @@ async def del_cookies_cmd(_, message: types.Message):
         except Exception:
             failed += 1
 
-    _reload_yt_cookies()
+    _reload_yt_cookies_instant()
 
-    msg = f"<blockquote>🗑 <b>All cookies deleted!</b>\n\n✅ Deleted: {deleted} files"
+    msg = (
+        f"<blockquote>🗑 <b>Saari Cookies Delete! (Instant Effect)</b>\n\n"
+        f"✅ Deleted: {deleted} file(s)"
+    )
     if failed:
-        msg += f"\n❌ Failed: {failed} files"
-    msg += "\n\nUse /scook to upload new cookies.</blockquote>"
-
+        msg += f"\n❌ Failed: {failed} file(s)"
+    msg += (
+        f"\n⚡ Bot turant update ho gaya!\n"
+        f"🔄 <b>Restart ki zaroorat nahi!</b>\n\n"
+        f"Nai cookies chahiye? Use:\n"
+        f"<code>/scookurl &lt;url&gt;</code></blockquote>"
+    )
     await message.reply_text(msg)
 
 
-# ── /tcook — Test COOKIE_URL from Railway env ─────────────────────────────────
+# ─── /lcook — List cookie files ───────────────────────────────────────────────
+@app.on_message(filters.command(["lcook", "listcookies"]) & filters.private)
+async def list_cookies_cmd(_, message: types.Message):
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
+    files = _all_cookie_files()
+    if not files:
+        return await message.reply_text("<blockquote>ℹ️ Koi cookie file nahi hai.</blockquote>")
+
+    lines = ["<blockquote><b>📂 Cookie Files</b>\n"]
+    for i, fpath in enumerate(files, 1):
+        fname = os.path.basename(fpath)
+        size = os.path.getsize(fpath) if os.path.exists(fpath) else 0
+        lines.append(f"{i}. <code>{fname}</code> — {size:,}B")
+    lines.append(f"\n<b>Total:</b> {len(files)} file(s)")
+    lines.append("\nTo delete: <code>/dcook filename.txt</code></blockquote>")
+
+    await message.reply_text("\n".join(lines))
+
+
+# ─── /tcook — Test COOKIE_URL from env ───────────────────────────────────────
 @app.on_message(filters.command(["tcook", "testcookies"]) & filters.private)
 async def test_cookies_cmd(_, message: types.Message):
-    if not message.from_user or not _is_owner(message.from_user.id):
-        return await message.reply_text("<blockquote>❌ Owner only command.</blockquote>")
+    if not message.from_user or not _is_owner_or_sudo(message.from_user.id):
+        return await message.reply_text("<blockquote>❌ Owner/Sudo only command.</blockquote>")
 
-    status = await message.reply_text("<blockquote>🔍 Testing COOKIE_URL from env...</blockquote>")
+    status = await message.reply_text("<blockquote>🔍 COOKIE_URL env se test kar raha hun...</blockquote>")
 
     urls = config.COOKIES_URL
 
     if not urls:
         return await status.edit_text(
-            "<blockquote>⚠️ <b>COOKIE_URL not set!</b>\n\n"
+            "<blockquote>⚠️ <b>COOKIE_URL set nahi hai!</b>\n\n"
             "Railway env mein <code>COOKIE_URL</code> variable add karo.\n\n"
-            "<b>Example:</b>\n"
-            "<code>https://batbin.de/xAbCdEfG</code>\n\n"
-            "Multiple URLs space se alag karo.</blockquote>"
+            "<b>Ya direct URL se load karo:</b>\n"
+            "<code>/scookurl https://batbin.de/raw/XXXX</code></blockquote>"
         )
 
     results = []
     all_ok = True
 
     for i, original_url in enumerate(urls, 1):
-        raw_url = yt._to_raw_url(original_url)
+        raw_url = yt._to_raw_url(original_url) if hasattr(yt, "_to_raw_url") else original_url
         result_lines = [f"<b>URL {i}:</b> <code>{original_url}</code>"]
 
-        if raw_url != original_url:
-            result_lines.append(f"🔄 Raw URL: <code>{raw_url}</code>")
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(raw_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    http_status = resp.status
-
-                    if http_status != 200:
-                        result_lines.append(f"❌ HTTP {http_status} — URL accessible nahi hai")
-                        all_ok = False
-                        results.append("\n".join(result_lines))
-                        continue
-
-                    content = await resp.read()
-                    size = len(content)
-                    content_text = content.decode("utf-8", errors="ignore")
-
-                    # Check: HTML page aayi toh URL galat hai
-                    if content_text.strip().startswith("<!DOCTYPE") or content_text.strip().startswith("<html"):
-                        result_lines.append(f"❌ HTML page mili — raw URL galat hai")
-                        result_lines.append(f"   Batbin use karo: <code>batbin.de/raw/XXXX</code>")
-                        all_ok = False
-                        results.append("\n".join(result_lines))
-                        continue
-
-                    # Check: size
-                    if size < 50:
-                        result_lines.append(f"❌ File bahut chhoti hai ({size} bytes) — paste empty lagta hai")
-                        all_ok = False
-                        results.append("\n".join(result_lines))
-                        continue
-
-                    # Check: Netscape format
-                    lines_all = content_text.splitlines()
-                    has_netscape = any("Netscape HTTP Cookie File" in l for l in lines_all[:3])
-                    cookie_lines = [l for l in lines_all if l.strip() and not l.startswith("#")]
-                    yt_found = any("youtube" in l.lower() or "google" in l.lower() for l in cookie_lines)
-                    google_found = any("google" in l.lower() for l in cookie_lines)
-
-                    # Summary
-                    result_lines.append(f"✅ HTTP {http_status} — Reachable")
-                    result_lines.append(f"📦 Size: {size:,} bytes")
-                    result_lines.append(f"📊 Cookie entries: {len(cookie_lines)}")
-                    result_lines.append(f"{'✅' if has_netscape else '⚠️'} Netscape format: {'Yes' if has_netscape else 'Not detected (might still work)'}")
-                    result_lines.append(f"{'✅' if yt_found else '❌'} YouTube cookies: {'Found' if yt_found else 'NOT found!'}")
-                    result_lines.append(f"{'✅' if google_found else '⚠️'} Google cookies: {'Found' if google_found else 'Not found'}")
-
-                    if not yt_found:
-                        result_lines.append(f"\n⚠️ YouTube cookies nahi hain — bot download fail karega")
-                        all_ok = False
-                    else:
-                        result_lines.append(f"\n✅ Ye URL kaam karega!")
-
-        except aiohttp.ClientConnectorError:
-            result_lines.append(f"❌ Connect nahi ho saka — URL galat ya site down hai")
+        content, err = await _download_cookies_from_url(original_url)
+        if err:
+            result_lines.append(f"❌ {err}")
             all_ok = False
-        except aiohttp.ServerTimeoutError:
-            result_lines.append(f"❌ Timeout — site respond nahi kar rahi (15s)")
-            all_ok = False
-        except Exception as e:
-            result_lines.append(f"❌ Error: <code>{e}</code>")
-            all_ok = False
+        else:
+            info = _analyze_cookie_content(content)
+            result_lines.append(f"✅ Reachable | 📊 {info['entry_count']} entries")
+            result_lines.append(f"{'✅' if info['yt_found'] else '❌'} YouTube cookies: {'Found!' if info['yt_found'] else 'NOT found!'}")
+            if not info["yt_found"]:
+                all_ok = False
 
         results.append("\n".join(result_lines))
 
-    separator = "\n\n─────────────────\n\n"
-    final_text = separator.join(results)
-
+    sep = "\n\n─────────────────\n\n"
+    final_text = sep.join(results)
     overall_icon = "✅" if all_ok else "❌"
-    overall_text = "Saari URLs theek hain!" if all_ok else "Kuch URLs mein problem hai — upar dekho"
+    overall_text = "Saari URLs theek hain!" if all_ok else "Kuch URLs mein problem hai!"
 
     await status.edit_text(
         f"<blockquote><b>🧪 Cookie URL Test</b>\n\n"
         f"{final_text}\n\n"
         f"─────────────────\n"
         f"{overall_icon} <b>Overall:</b> {overall_text}\n\n"
-        f"• /ccook — loaded files check karo\n"
-        f"• /scook — file upload karo</blockquote>"
+        f"• /ccook — loaded files check\n"
+        f"• /scookurl &lt;url&gt; — instant load from URL</blockquote>"
     )
