@@ -13,10 +13,12 @@ GIF Management (owner/sudo/admin only):
 
 import time
 from datetime import timedelta
-from pyrogram import Client, filters
+from pyrogram import filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
+# ✅ FIX: Use the actual client instance 'app'
+from HasiiMusic import app
 from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
 
 try:
@@ -62,16 +64,14 @@ def clear_afk(user_id: int):
 
 
 # ─── GIF management commands ─────────────────────────────────────────────────
-try:
-    from HasiiMusic import app as _app
-    register_gif_commands(_app, "afk", "afk")
-except Exception:
-    pass
+# ✅ FIX: Pass correct app instance
+register_gif_commands(app, "afk", "afk")
 
 
 # ─── /afk ────────────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("afk") & (filters.group | filters.private))
-async def afk_cmd(client: Client, message: Message):
+# ✅ FIX: Use @app.on_message instead of @Client.on_message
+@app.on_message(filters.command("afk") & (filters.group | filters.private))
+async def afk_cmd(client, message: Message):
     user = message.from_user
     reason = " ".join(message.command[1:]) if len(message.command) > 1 else "Koi reason nahi diya."
     set_afk(user.id, reason)
@@ -89,17 +89,23 @@ async def afk_cmd(client: Client, message: Message):
         f"<i>Jab tak reply na karo, samjho AFK hai 🌙</i>"
         f"</blockquote>"
     )
-    await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+    
+    # ✅ FIX: Send GIF only if available, else send only text
+    if gif:
+        await message.reply_animation(gif, caption=caption, parse_mode="html")
+    else:
+        await message.reply_text(caption, parse_mode="html")
 
 
 # ─── /back ───────────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("back") & (filters.group | filters.private))
-async def back_cmd(client: Client, message: Message):
+@app.on_message(filters.command("back") & (filters.group | filters.private))
+async def back_cmd(client, message: Message):
     user = message.from_user
     doc = is_afk(user.id)
     if not doc:
         return await message.reply(
-            "<blockquote>ℹ️ Tum AFK mein nahi the abhi.</blockquote>"
+            "<blockquote>ℹ️ Tum AFK mein nahi the abhi.</blockquote>",
+            parse_mode="html"
         )
 
     duration = _time_fmt(int(time.time()) - doc["since"])
@@ -115,8 +121,8 @@ async def back_cmd(client: Client, message: Message):
 
 
 # ─── Auto-return ──────────────────────────────────────────────────────────────
-@Client.on_message(filters.group & ~filters.bot & ~filters.command(["afk"]))
-async def auto_back(client: Client, message: Message):
+@app.on_message(filters.group & ~filters.bot & ~filters.command(["afk"]))
+async def auto_back(client, message: Message):
     if not message.from_user:
         return
     doc = is_afk(message.from_user.id)
@@ -125,17 +131,17 @@ async def auto_back(client: Client, message: Message):
         clear_afk(message.from_user.id)
         await message.reply(
             f"<blockquote>"
-            f"🥂 <b>Welcome Back, {message.from_user.mention}!</b>\n\n"
+            f"✅ <b>Welcome Back, {message.from_user.mention}!</b>\n\n"
             f"⏳ Tum <b>{duration}</b> ke liye AFK the.\n"
-            f"<i>Wapas aa gaye! 💓</i>"
+            f"<i>Wapas aa gaye! 🎉</i>"
             f"</blockquote>",
             parse_mode="html",
         )
 
 
 # ─── Mention notify ───────────────────────────────────────────────────────────
-@Client.on_message(filters.group & ~filters.bot)
-async def mention_check(client: Client, message: Message):
+@app.on_message(filters.group & ~filters.bot)
+async def mention_check(client, message: Message):
     if not message.from_user:
         return
     targets = []
