@@ -1,11 +1,14 @@
 """
-AFK Plugin for HasiiMusicBot
+AFK Plugin — v2 with GIF Manager
 Commands:
-  /afk [reason]  - Go AFK (optionally with a reason)
-  /back          - Manually come back from AFK (also auto-triggers on any message)
+  /afk [reason]  - Go AFK with big styled message + GIF
+  /back          - Manually return from AFK
 
-When an AFK user is mentioned/replied-to, bot notifies with how long they've been AFK.
-AFK GIFs auto-rotate on /afk command.
+GIF Management (owner/sudo/admin only):
+  /setafkgif      - Reply to GIF → add to AFK list
+  /setafkgif naam - Reply to GIF + give custom name
+  /rmafkgif <n>   - Remove AFK GIF by number
+  /listafkgif     - See all AFK GIFs with numbers
 """
 
 import time
@@ -14,14 +17,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
-# ─── AFK GIF FILE IDs ────────────────────────────────────────────────────────
-AFK_GIFS = [
-    "CgACAgQAAxkBAAFK1XtqF9_2tJ3gO-M4s5maiJUEhyOj8QACYAYAArVNxVPwrkrEYMP32DsE",  # meryl-sleeping
-    "CgACAgQAAxkBAAFK1X1qF9_9eF2EuPslGxXRc_IJjJakuwACcgoAAsxW1VF_E0ajtS9OWDsE",  # agleia-afk
-    "CgACAgQAAxkBAAFK1X9qF-AEMI7JIAND7ETKRFm39cuMOgAC3QUAArsSfFKCBG-3ncRIijsE",  # nemesis-sleeping
-]
+from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
 
-# ─── DB ──────────────────────────────────────────────────────────────────────
 try:
     from HasiiMusic.core.mongo import mongodb as db
 except ImportError:
@@ -33,24 +30,22 @@ afk_col = db["afk_users"]
 
 
 def _time_fmt(seconds: int) -> str:
-    """Convert seconds to human-readable duration."""
     td = timedelta(seconds=seconds)
-    days = td.days
-    hours, rem = divmod(td.seconds, 3600)
-    minutes, secs = divmod(rem, 60)
     parts = []
-    if days:
-        parts.append(f"{days}d")
-    if hours:
-        parts.append(f"{hours}h")
-    if minutes:
-        parts.append(f"{minutes}m")
+    if td.days:
+        parts.append(f"{td.days}d")
+    h, r = divmod(td.seconds, 3600)
+    m, s = divmod(r, 60)
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
     if not parts:
-        parts.append(f"{secs}s")
+        parts.append(f"{s}s")
     return " ".join(parts)
 
 
-def is_afk(user_id: int) -> dict | None:
+def is_afk(user_id: int):
     return afk_col.find_one({"user_id": user_id})
 
 
@@ -66,83 +61,95 @@ def clear_afk(user_id: int):
     afk_col.delete_one({"user_id": user_id})
 
 
-# ─── /afk ────────────────────────────────────────────────────────────────────
-import random
+# ─── GIF management commands ─────────────────────────────────────────────────
+try:
+    from HasiiMusic import app as _app
+    register_gif_commands(_app, "afk", "afk")
+except Exception:
+    pass
 
+
+# ─── /afk ────────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("afk") & (filters.group | filters.private))
 async def afk_cmd(client: Client, message: Message):
     user = message.from_user
-    reason = " ".join(message.command[1:]) if len(message.command) > 1 else "No reason given."
+    reason = " ".join(message.command[1:]) if len(message.command) > 1 else "Koi reason nahi diya."
     set_afk(user.id, reason)
 
-    gif = random.choice(AFK_GIFS)
+    gif = get_random_gif("afk")
     caption = (
-        f"😴 {user.mention} is now **AFK**!\n"
-        f"**Reason:** {reason}"
+        f"<blockquote>"
+        f"😴 <b>{user.first_name} AFK ho gaya!</b>\n\n"
+        f"╔══════════════════╗\n"
+        f"║  💤  A F K  M O D E  💤  ║\n"
+        f"╚══════════════════╝\n\n"
+        f"👤 <b>User:</b> {user.mention}\n"
+        f"📝 <b>Reason:</b> {reason}\n"
+        f"⏰ <b>Gaya:</b> Abhi abhi\n\n"
+        f"<i>Jab tak reply na karo, samjho AFK hai 🌙</i>"
+        f"</blockquote>"
     )
-
-    if message.chat.type.value == "private":
-        await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
-    else:
-        await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+    await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
 
 
-# ─── /back (manual return) ───────────────────────────────────────────────────
+# ─── /back ───────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("back") & (filters.group | filters.private))
 async def back_cmd(client: Client, message: Message):
     user = message.from_user
     doc = is_afk(user.id)
     if not doc:
-        return await message.reply("You are not AFK right now.")
+        return await message.reply(
+            "<blockquote>ℹ️ Tum AFK mein nahi the abhi.</blockquote>"
+        )
 
     duration = _time_fmt(int(time.time()) - doc["since"])
     clear_afk(user.id)
     await message.reply(
-        f"✅ Welcome back, {user.mention}!\n"
-        f"You were AFK for **{duration}**.",
+        f"<blockquote>"
+        f"✅ <b>Welcome Back, {user.mention}!</b>\n\n"
+        f"⏳ Tum <b>{duration}</b> ke liye AFK the.\n"
+        f"<i>Khush aamdeed! 🎉</i>"
+        f"</blockquote>",
         parse_mode="html",
     )
 
 
-# ─── Auto-return when AFK user sends a message ───────────────────────────────
-@Client.on_message(
-    filters.group & ~filters.bot & ~filters.command(["afk"])
-)
+# ─── Auto-return ──────────────────────────────────────────────────────────────
+@Client.on_message(filters.group & ~filters.bot & ~filters.command(["afk"]))
 async def auto_back(client: Client, message: Message):
     if not message.from_user:
         return
-    user = message.from_user
-    doc = is_afk(user.id)
+    doc = is_afk(message.from_user.id)
     if doc:
         duration = _time_fmt(int(time.time()) - doc["since"])
-        clear_afk(user.id)
+        clear_afk(message.from_user.id)
         await message.reply(
-            f"✅ Welcome back, {user.mention}! You were AFK for **{duration}**.",
+            f"<blockquote>"
+            f"🥂 <b>Welcome Back, {message.from_user.mention}!</b>\n\n"
+            f"⏳ Tum <b>{duration}</b> ke liye AFK the.\n"
+            f"<i>Wapas aa gaye! 💓</i>"
+            f"</blockquote>",
             parse_mode="html",
         )
 
 
-# ─── Notify when AFK user is mentioned or replied to ─────────────────────────
+# ─── Mention notify ───────────────────────────────────────────────────────────
 @Client.on_message(filters.group & ~filters.bot)
 async def mention_check(client: Client, message: Message):
+    if not message.from_user:
+        return
     targets = []
-
-    # Check reply-to
     if message.reply_to_message and message.reply_to_message.from_user:
         targets.append(message.reply_to_message.from_user)
-
-    # Check text mentions (HTML/markdown @username or tg-mention)
     if message.entities:
         for ent in message.entities:
             if ent.type.value in ("mention", "text_mention"):
                 if ent.user:
                     targets.append(ent.user)
                 elif message.text:
-                    # @username — resolve
-                    username = message.text[ent.offset + 1 : ent.offset + ent.length]
+                    uname = message.text[ent.offset + 1: ent.offset + ent.length]
                     try:
-                        u = await client.get_users(username)
-                        targets.append(u)
+                        targets.append(await client.get_users(uname))
                     except Exception:
                         pass
 
@@ -152,10 +159,12 @@ async def mention_check(client: Client, message: Message):
         doc = is_afk(target.id)
         if doc:
             duration = _time_fmt(int(time.time()) - doc["since"])
-            reason = doc.get("reason", "No reason given.")
             await message.reply(
-                f"⚠️ {target.mention} is **AFK** right now!\n"
-                f"**Reason:** {reason}\n"
-                f"**Since:** {duration} ago",
+                f"<blockquote>"
+                f"⚠️ <b>{target.first_name} AFK mein hai!</b>\n\n"
+                f"😴 <b>Reason:</b> {doc.get('reason', 'Koi reason nahi.')}\n"
+                f"⏰ <b>Since:</b> {duration} pehle se\n\n"
+                f"<i>Thoda wait karo, woh jald wapas aayega 🌙</i>"
+                f"</blockquote>",
                 parse_mode="html",
             )
