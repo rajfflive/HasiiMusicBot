@@ -1,13 +1,17 @@
 """
-Couple Plugin for HasiiMusicBot
+Couple Plugin — v2 with GIF Manager
 Commands:
-  /couple @user      - Ship yourself with mentioned user
-  /uncouple          - Break up with your current partner
-  /mycouple          - Show your current couple status
-  /couples           - Randomly ship two group members together
-  /couplerank        - Top couples in this group (by days together)
+  /couple @user      - Ship with mentioned user (love%, GIF, loving line)
+  /uncouple          - Break up
+  /mycouple          - Your couple status
+  /couples           - Today's random couple
+  /couplerank        - Top couples by days
 
-Couple GIFs auto-rotate on each /couple command.
+GIF Management (owner/sudo/admin only):
+  /setcouplegif      - Reply to GIF → add to couple list
+  /setcouplegif naam - Reply to GIF + give custom name
+  /rmcouplegif <n>   - Remove couple GIF by number
+  /listcouplegif     - See all couple GIFs with numbers
 """
 
 import random
@@ -17,15 +21,10 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
-# ─── COUPLE GIF FILE IDs (from your pasted raw data) ─────────────────────────
-COUPLE_GIFS = [
-    "CgACAgQAAxkBAAFK9NVqGYk7xGGp2pAGKupttLxHLImdNAACywgAAlbJrFHKM99F2lJZNjsE",  # anime-spy-x-family
-    "CgACAgQAAxkBAAFK9NdqGYlJRLjZxUlz6jec9SLLVAVZnQACIAoAApdj3FK7a0fitBb2rjsE",  # hug-anime
-    "CgACAgQAAxkBAAFK9NtqGYltnBtoCk7VxU3EJ300kL99uwAClgoAAhFTVFGKWgZh40VeIjsE",  # anime-comfort-hug
-    "CgACAgQAAxkBAAFK9OpqGYmyFoqnLKhJv0SphjfTUPupawAC4gQAAhZQHFHHpA-xsiUtfjsE",  # hug
-]
+from HasiiMusic.helpers.gif_manager import (
+    get_random_gif, register_gif_commands,
+)
 
-# ─── DB ──────────────────────────────────────────────────────────────────────
 try:
     from HasiiMusic.core.mongo import mongodb as db
 except ImportError:
@@ -34,6 +33,33 @@ except ImportError:
     db = _client["HasiiMusicBot"]
 
 couples_col = db["couples"]
+
+COUPLE_LINES = [
+    "Tumhara dil mere liye aur mera dil tumhare liye 💘",
+    "Is duniya mein koi nahi tumhare jaisa, dil de diya tumhein 🥰",
+    "Tum mile toh zindagi ka matlab samajh aaya 💞",
+    "Kuch log kismat se milte hain, aur tum kismat ban jaate ho 🌸",
+    "Teri baahon mein ek alag hi sukoon hai 💑",
+    "Mohabbat ka doosra naam hai — tum 💓",
+    "Aaj ke couple ne dil jeet liya! 🏆❤️",
+    "Yeh do dil, ek hi dhadkan 💗",
+    "Saath rehna hai, bichadna nahi — yahi hai saccha pyaar 🌺",
+    "Tumhari hansi pe mera dil fida hai 😍",
+    "Aankh uthi aur tum the samne — kismat ne milaya 💫",
+    "Log aate jaate hain, tum reh jaate ho ❣️",
+    "Ye wala pyaar wali baat hai boss! 😘",
+    "Ship ho gaye officially — ab toh pakka hai 🚢❤️",
+]
+
+TODAYS_COUPLE_LINES = [
+    "🌸 Aaj ke liye yeh dono — made for each other!",
+    "💘 Fate ne milaya, aur hum ship kar rahe hain!",
+    "🎯 Random nahi, destiny hai yaar!",
+    "✨ Aaj ka power couple reveal ho gaya!",
+    "🔥 Yeh combination toh ek dum fire hai!",
+    "💫 Aaj ki love story start ho gayi!",
+    "🌺 Dono mein chemistry hai bhai — pakki baat!",
+]
 
 
 def _days_fmt(seconds: int) -> str:
@@ -48,46 +74,55 @@ def _days_fmt(seconds: int) -> str:
     return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 
+def _love_percent(id1: int, id2: int) -> int:
+    seed = abs(id1 ^ id2 ^ (id1 + id2))
+    random.seed(seed)
+    pct = random.randint(65, 100)
+    random.seed()
+    return pct
+
+
+def _love_bar(pct: int) -> str:
+    filled = round(pct / 10)
+    return "❤️" * filled + "🖤" * (10 - filled)
+
+
 def get_couple(user_id: int):
     return couples_col.find_one({"user_id": user_id})
 
 
-def get_couple_of(user_id: int):
-    """Find the couple record where this user is the partner."""
-    return couples_col.find_one({"partner_id": user_id})
-
-
 def make_couple(user_id: int, partner_id: int):
     now = int(time.time())
-    # Store both directions so both users can look up
-    couples_col.update_one(
-        {"user_id": user_id},
-        {"$set": {"partner_id": partner_id, "since": now}},
-        upsert=True,
-    )
-    couples_col.update_one(
-        {"user_id": partner_id},
-        {"$set": {"partner_id": user_id, "since": now}},
-        upsert=True,
-    )
+    for uid, pid in [(user_id, partner_id), (partner_id, user_id)]:
+        couples_col.update_one(
+            {"user_id": uid},
+            {"$set": {"partner_id": pid, "since": now}},
+            upsert=True,
+        )
 
 
 def break_couple(user_id: int):
     doc = get_couple(user_id)
     if doc:
-        partner_id = doc.get("partner_id")
         couples_col.delete_one({"user_id": user_id})
-        if partner_id:
-            couples_col.delete_one({"user_id": partner_id})
+        if doc.get("partner_id"):
+            couples_col.delete_one({"user_id": doc["partner_id"]})
+
+
+# ─── GIF management commands ─────────────────────────────────────────────────
+try:
+    from HasiiMusic import app as _app
+    register_gif_commands(_app, "couple", "couple")
+except Exception:
+    pass
 
 
 # ─── /couple ─────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("couple") & filters.group)
 async def couple_cmd(client: Client, message: Message):
     user = message.from_user
-
-    # Must mention or reply to someone
     target = None
+
     if message.reply_to_message and message.reply_to_message.from_user:
         target = message.reply_to_message.from_user
     elif message.entities:
@@ -96,7 +131,7 @@ async def couple_cmd(client: Client, message: Message):
                 target = ent.user
                 break
             elif ent.type.value == "mention" and message.text:
-                uname = message.text[ent.offset + 1 : ent.offset + ent.length]
+                uname = message.text[ent.offset + 1: ent.offset + ent.length]
                 try:
                     target = await client.get_users(uname)
                     break
@@ -104,43 +139,54 @@ async def couple_cmd(client: Client, message: Message):
                     pass
 
     if not target:
-        return await message.reply("💔 Mention or reply to the user you want to couple with!")
-
+        return await message.reply(
+            "<blockquote>💔 Mention ya reply karo jis se couple banana hai!</blockquote>"
+        )
     if target.id == user.id:
-        return await message.reply("😂 You can't couple with yourself!")
-
+        return await message.reply(
+            "<blockquote>😂 Apne aap se couple nahi ban sakte!</blockquote>"
+        )
     if target.is_bot:
-        return await message.reply("🤖 You can't couple with a bot!")
+        return await message.reply(
+            "<blockquote>🤖 Bot se couple nahi ban sakte!</blockquote>"
+        )
 
-    # Check if already coupled
     existing = get_couple(user.id)
     if existing:
         if existing["partner_id"] == target.id:
+            pct = _love_percent(user.id, target.id)
             return await message.reply(
-                f"💕 You're already coupled with {target.mention}!", parse_mode="html"
+                f"<blockquote>💕 Tum already {target.mention} ke saath couple ho!\n"
+                f"💖 Love: <b>{pct}%</b> {_love_bar(pct)}</blockquote>",
+                parse_mode="html"
             )
         return await message.reply(
-            "💔 You're already in a couple! Use /uncouple first."
+            "<blockquote>💔 Tum already ek couple mein ho! Pehle /uncouple karo.</blockquote>"
         )
 
-    # Check if target is already coupled
-    target_existing = get_couple(target.id)
-    if target_existing:
+    if get_couple(target.id):
         return await message.reply(
-            f"💔 {target.mention} is already in a couple!", parse_mode="html"
+            f"<blockquote>💔 {target.mention} already kisi aur ke saath couple mein hai!</blockquote>",
+            parse_mode="html"
         )
 
     make_couple(user.id, target.id)
 
-    gif = random.choice(COUPLE_GIFS)
+    pct = _love_percent(user.id, target.id)
+    gif = get_random_gif("couple")
     caption = (
-        f"💑 **New Couple Alert!**\n\n"
-        f"💕 {user.mention} ❤️ {target.mention}\n\n"
-        f"Congratulations to the new couple! 🎉"
+        f"<blockquote>"
+        f"💑 <b>Naya Couple Alert!</b>\n\n"
+        f"❤️ {user.mention}\n"
+        f"╰┈➤ loves ➤\n"
+        f"💕 {target.mention}\n\n"
+        f"💖 <b>Love Meter:</b> {pct}%\n"
+        f"{_love_bar(pct)}\n\n"
+        f"<i>{random.choice(COUPLE_LINES)}</i>\n\n"
+        f"🎉 Congratulations to the new couple!"
+        f"</blockquote>"
     )
-    await client.send_animation(
-        message.chat.id, gif, caption=caption, parse_mode="html"
-    )
+    await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
 
 
 # ─── /uncouple ───────────────────────────────────────────────────────────────
@@ -148,23 +194,25 @@ async def couple_cmd(client: Client, message: Message):
 async def uncouple_cmd(client: Client, message: Message):
     user = message.from_user
     doc = get_couple(user.id)
-
     if not doc:
-        return await message.reply("💔 You're not in a couple right now.")
+        return await message.reply(
+            "<blockquote>💔 Tum abhi kisi couple mein nahi ho.</blockquote>"
+        )
 
-    partner_id = doc.get("partner_id")
     duration = _days_fmt(int(time.time()) - doc.get("since", int(time.time())))
-
     try:
-        partner = await client.get_users(partner_id)
-        partner_mention = partner.mention
+        partner = await client.get_users(doc.get("partner_id"))
+        p_mention = partner.mention
     except Exception:
-        partner_mention = f"User#{partner_id}"
+        p_mention = f"User#{doc.get('partner_id')}"
 
     break_couple(user.id)
     await message.reply(
-        f"💔 {user.mention} and {partner_mention} have broken up after **{duration}** together.\n\n"
-        f"Hope you both find happiness! 🌸",
+        f"<blockquote>"
+        f"💔 {user.mention} aur {p_mention} ne breakup kar liya.\n"
+        f"⏳ <b>{duration}</b> saath bitaye the.\n\n"
+        f"<i>Dono ko aage ki zindagi mein khushiyaan milein 🌸</i>"
+        f"</blockquote>",
         parse_mode="html",
     )
 
@@ -174,28 +222,31 @@ async def uncouple_cmd(client: Client, message: Message):
 async def mycouple_cmd(client: Client, message: Message):
     user = message.from_user
     doc = get_couple(user.id)
-
     if not doc:
-        return await message.reply("💔 You're currently single. Use /couple @user to ship yourself!")
+        return await message.reply(
+            "<blockquote>💔 Tum abhi single ho.\n💡 Use /couple @user to ship!</blockquote>"
+        )
 
     partner_id = doc.get("partner_id")
-    duration = _days_fmt(int(time.time()) - doc.get("since", int(time.time())))
-
+    pct = _love_percent(user.id, partner_id)
     try:
         partner = await client.get_users(partner_id)
-        partner_mention = partner.mention
+        p_mention = partner.mention
     except Exception:
-        partner_mention = f"User#{partner_id}"
+        p_mention = f"User#{partner_id}"
 
     await message.reply(
-        f"💕 **Your Couple Status**\n\n"
-        f"💑 Partner: {partner_mention}\n"
-        f"⏳ Together for: **{duration}**",
+        f"<blockquote>"
+        f"💕 <b>Tumhara Couple Status</b>\n\n"
+        f"💑 Partner: {p_mention}\n"
+        f"⏳ Saath: <b>{_days_fmt(int(time.time()) - doc.get('since', int(time.time())))}</b>\n"
+        f"💖 Love: <b>{pct}%</b>\n{_love_bar(pct)}"
+        f"</blockquote>",
         parse_mode="html",
     )
 
 
-# ─── /couples (random ship two group members) ────────────────────────────────
+# ─── /couples ────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("couples") & filters.group)
 async def couples_random_cmd(client: Client, message: Message):
     members = []
@@ -204,53 +255,55 @@ async def couples_random_cmd(client: Client, message: Message):
             members.append(member.user)
 
     if len(members) < 2:
-        return await message.reply("😅 Not enough members in this group to ship!")
+        return await message.reply(
+            "<blockquote>😅 Group mein kam se kam 2 members chahiye!</blockquote>"
+        )
 
-    # Pick 2 unique random members
-    user1, user2 = random.sample(members, 2)
+    u1, u2 = random.sample(members, 2)
+    pct = _love_percent(u1.id, u2.id)
+    gif = get_random_gif("couple")
 
-    gif = random.choice(COUPLE_GIFS)
-    caption = (
-        f"💘 **Today's Random Couple!**\n\n"
-        f"💕 {user1.mention} ❤️ {user2.mention}\n\n"
-        f"Aaj ke liye yeh dono perfect match hain! 🌸✨"
-    )
     await client.send_animation(
-        message.chat.id, gif, caption=caption, parse_mode="html"
+        message.chat.id, gif,
+        caption=(
+            f"<blockquote>"
+            f"💘 <b>Today's Best Couple! 🏆</b>\n\n"
+            f"❤️ {u1.mention}\n╰┈➤ ❤️‍🔥 ➤\n💕 {u2.mention}\n\n"
+            f"💖 <b>Love Meter:</b> {pct}%\n{_love_bar(pct)}\n\n"
+            f"<i>{random.choice(TODAYS_COUPLE_LINES)}</i>"
+            f"</blockquote>"
+        ),
+        parse_mode="html"
     )
 
 
 # ─── /couplerank ─────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("couplerank") & filters.group)
 async def couplerank_cmd(client: Client, message: Message):
-    # Get all couples, sorted by time together (oldest first = longest)
     all_docs = list(couples_col.find().sort("since", 1))
-
-    # Deduplicate pairs (A-B and B-A are same couple)
-    seen = set()
-    ranked = []
+    seen, ranked = set(), []
     for doc in all_docs:
         pair = tuple(sorted([doc["user_id"], doc["partner_id"]]))
-        if pair in seen:
-            continue
-        seen.add(pair)
-        ranked.append((pair, doc.get("since", int(time.time()))))
+        if pair not in seen:
+            seen.add(pair)
+            ranked.append((pair, doc.get("since", int(time.time()))))
 
     if not ranked:
-        return await message.reply("💔 No couples registered yet!")
+        return await message.reply(
+            "<blockquote>💔 Abhi koi couple registered nahi hai!</blockquote>"
+        )
 
     now = int(time.time())
-    text = "🏆 **Couple Rankings**\n\n"
-    medals = ["🥇", "🥈", "🥉"]
-
+    text = "<blockquote>🏆 <b>Best Couples Ranking</b>\n\n"
     for i, (pair, since) in enumerate(ranked[:10]):
-        medal = medals[i] if i < 3 else f"{i + 1}."
-        duration = _days_fmt(now - since)
+        medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f"{i+1}."
+        pct = _love_percent(pair[0], pair[1])
         try:
             u1 = await client.get_users(pair[0])
             u2 = await client.get_users(pair[1])
-            text += f"{medal} {u1.first_name} ❤️ {u2.first_name} — **{duration}**\n"
+            text += f"{medal} {u1.first_name} ❤️ {u2.first_name} — <b>{_days_fmt(now-since)}</b> | 💖{pct}%\n"
         except Exception:
-            text += f"{medal} ID#{pair[0]} ❤️ ID#{pair[1]} — **{duration}**\n"
+            text += f"{medal} ID#{pair[0]} ❤️ ID#{pair[1]} — <b>{_days_fmt(now-since)}</b> | 💖{pct}%\n"
+    text += "</blockquote>"
 
     await message.reply(text, parse_mode="html")
