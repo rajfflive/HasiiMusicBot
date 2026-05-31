@@ -375,7 +375,7 @@ async def gbdtag_cmd(client, message: types.Message):
 
     header = (
         f"🎂 <b>Birthday Mubarak {bday_mention}!</b> 🎉\n"
-        f"Sabse wish karo aaj ke birthday star ko! 🎁\n"
+        f"Sab wish karo aaj ke birthday star ko! 🎁\n"
         f"🥳 Happy Birthday {bday_name}! Bahut saari khushiyaan milein!"
     )
     asyncio.create_task(
