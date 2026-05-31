@@ -15,7 +15,7 @@ FIX: @Client.on_message → @app.on_message  (yahi main bug tha)
 
 import time
 from datetime import timedelta
-from pyrogram import filters
+from pyrogram import enums, filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
@@ -94,11 +94,11 @@ async def afk_cmd(client, message: Message):
 
     if gif:
         try:
-            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode=enums.ParseMode.HTML)
             return
         except Exception:
             pass
-    await message.reply(caption, parse_mode="html")
+    await message.reply(caption, parse_mode=enums.ParseMode.HTML)
 
 
 # ─── /back ───────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ async def back_cmd(client, message: Message):
         f"⏳ Tum <b>{duration}</b> ke liye AFK the.\n"
         f"<i>Khush aamdeed! 🎉</i>"
         f"</blockquote>",
-        parse_mode="html",
+        parse_mode=enums.ParseMode.HTML,
     )
 
 
@@ -141,7 +141,7 @@ async def auto_back(client, message: Message):
                 f"⏳ Tum <b>{duration}</b> ke liye AFK the.\n"
                 f"<i>Wapas aa gaye! 🎉</i>"
                 f"</blockquote>",
-                parse_mode="html",
+                parse_mode=enums.ParseMode.HTML,
             )
         except Exception:
             pass
@@ -181,7 +181,7 @@ async def mention_check(client, message: Message):
                     f"⏰ <b>Since:</b> {duration} pehle se\n\n"
                     f"<i>Thoda wait karo, woh jald wapas aayega 🌙</i>"
                     f"</blockquote>",
-                    parse_mode="html",
+                    parse_mode=enums.ParseMode.HTML,
                 )
             except Exception:
                 pass
