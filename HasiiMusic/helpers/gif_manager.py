@@ -1,7 +1,20 @@
 """
-GIF Manager — Shared helper for all plugins
+GIF Manager — v3 Updated
+Shared helper for all plugins.
 Stores GIFs per type in MongoDB. Add/remove/list from bot directly.
-Types: "couple", "afk", "welcome", "start", "ping"
+
+Types supported:
+  "couple"   → /setcouplegif, /rmcouplegif, /listcouplegif
+  "afk"      → /setafkgif, /rmafkgif, /listafkgif
+  "welcome"  → /setwelgif, /rmwelgif, /listwelgif
+  "start"    → /setstartgif, /rmstartgif, /liststartgif
+  "play"     → /setplaygif, /rmplaygif, /listplaygif   ← NEW
+  "ping"     → /setpinggif, /rmpinggif, /listpinggif
+  "gmtag"    → /setgmgif, /rmgmgif, /listgmgif         ← NEW
+  "gntag"    → /setgngif, /rmgngif, /listgngif          ← NEW
+  "gdtag"    → /setgdgif, /rmgdgif, /listgdgif          ← NEW
+  "gevtag"   → /setgevgif, /rmgevgif, /listgevgif       ← NEW
+  "gbdtag"   → /setgbdgif, /rmgbdgif, /listgbdgif       ← NEW
 """
 
 from pymongo import MongoClient as PyMongoClient
@@ -44,6 +57,17 @@ DEFAULTS = {
     "ping": [
         {"file_id": "CgACAgQAAxkBAAFK9NVqGYk7xGGp2pAGKupttLxHLImdNAACywgAAlbJrFHKM99F2lJZNjsE", "name": "ping-default"},
     ],
+    # ── Play GIF — ab bot se seedha change kar sakte ho ──────────────────────
+    "play": [
+        {"file_id": "CAACAgUAAxkBAAFK2l9qGCwP-906O81HLo8pxYoR7SdStAACXyAAAkfhyVSX1A2fYeap8DsE", "name": "play-sticker-1"},
+        {"file_id": "CAACAgUAAxkBAAFK2mFqGCwUFZFdBYmV-ubGzdQV6Z0PAwACySAAAiY8wFQqWC8co8TsbjsE", "name": "play-sticker-2"},
+    ],
+    # ── TagAll greeting GIFs — default khaali hain, set karo apne se ─────────
+    "gmtag": [],   # Good Morning — /setgmgif se add karo
+    "gntag": [],   # Good Night   — /setgngif se add karo
+    "gdtag": [],   # Good Afternoon — /setgdgif se add karo
+    "gevtag": [],  # Good Evening — /setgevgif se add karo
+    "gbdtag": [],  # Birthday     — /setgbdgif se add karo
 }
 
 
@@ -59,7 +83,7 @@ def get_gifs(gif_type: str) -> list:
 
 
 def get_random_gif(gif_type: str):
-    """Return a random file_id for this type."""
+    """Return a random file_id for this type. Returns None if no GIFs."""
     import random
     gifs = get_gifs(gif_type)
     return random.choice(gifs)["file_id"] if gifs else None
@@ -106,7 +130,10 @@ def list_gifs_text(gif_type: str) -> str:
     gifs = custom if custom else DEFAULTS.get(gif_type, [])
 
     if not gifs:
-        return f"<blockquote>❌ <b>{gif_type.upper()} GIFs:</b> Koi GIF set nahi hai.</blockquote>"
+        return (
+            f"<blockquote>❌ <b>{gif_type.upper()} GIFs:</b> Koi GIF set nahi hai.\n\n"
+            f"<code>/set{gif_type}gif</code> se GIF reply karke add karo.</blockquote>"
+        )
 
     lines = [f"<blockquote>🎬 <b>{gif_type.upper()} GIFs</b> {'(default)' if using_default else '(custom)'}:\n"]
     for i, g in enumerate(gifs, 1):
@@ -150,9 +177,11 @@ async def is_owner_sudo_or_admin(client, chat_id: int, user_id: int) -> bool:
         return False
 
 
-# ── Extract file_id from a message (animation/video/document) ─────────────────
+# ── Extract file_id from a message (animation/video/document/sticker) ────────
 def extract_file_id(message):
-    """Returns (file_id, name) from a message that has a GIF/animation."""
+    """Returns (file_id, name) from a message that has a GIF/animation/sticker."""
+    if message.sticker:
+        return message.sticker.file_id, message.sticker.emoji or "sticker"
     if message.animation:
         return message.animation.file_id, message.animation.file_name or "animation"
     if message.video:
@@ -167,6 +196,10 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
     """
     Registers /set{prefix}gif, /rm{prefix}gif, /list{prefix}gif
     on the given Pyrogram app instance.
+
+    Example:
+      register_gif_commands(app, "play", "play")
+      → /setplaygif, /rmplaygif, /listplaygif
     """
     from pyrogram import filters
 
@@ -176,6 +209,8 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
 
     @app_instance.on_message(filters.command(set_cmd))
     async def _set_gif(client, message):
+        if not message.from_user:
+            return
         if not await is_owner_sudo_or_admin(client, message.chat.id, message.from_user.id):
             return await message.reply(
                 "<blockquote>❌ Sirf owner/sudo/admin yeh kar sakte hain.</blockquote>",
@@ -188,8 +223,8 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
         if not file_id:
             return await message.reply(
                 f"<blockquote>"
-                f"❌ <b>GIF nahi mili!</b>\n\n"
-                f"Kisi GIF ko reply karke <code>/{set_cmd}</code> likho\n"
+                f"❌ <b>GIF/Sticker nahi mili!</b>\n\n"
+                f"Kisi GIF ya sticker ko reply karke <code>/{set_cmd}</code> likho\n"
                 f"Ya ek custom naam bhi de sakte ho:\n"
                 f"<code>/{set_cmd} meri-gif</code>"
                 f"</blockquote>",
@@ -219,6 +254,8 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
 
     @app_instance.on_message(filters.command(rm_cmd))
     async def _rm_gif(client, message):
+        if not message.from_user:
+            return
         if not await is_owner_sudo_or_admin(client, message.chat.id, message.from_user.id):
             return await message.reply(
                 "<blockquote>❌ Sirf owner/sudo/admin yeh kar sakte hain.</blockquote>",
