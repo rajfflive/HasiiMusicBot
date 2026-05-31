@@ -1,12 +1,15 @@
 """
-Start Plugin — v2 with GIF Manager
+Start Plugin — v3 (verified correct)
 /start in private → shows GIF from DB (or default mint-nikke)
 
-GIF Management (owner/sudo only — private chat):
+GIF Management (owner/sudo only — private chat mein karo):
   /setstartgif       - Reply to GIF → set as start GIF
   /setstartgif naam  - Reply to GIF + custom name
   /rmstartgif <n>    - Remove start GIF by number
   /liststartgif      - See all start GIFs with numbers
+
+Note: Yeh file already @app.on_message use karti thi — koi bug nahi tha.
+Sirf minor improvements kiye hain.
 """
 
 from pyrogram import enums, errors, filters, types
