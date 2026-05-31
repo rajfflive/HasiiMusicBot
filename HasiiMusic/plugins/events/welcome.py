@@ -17,7 +17,7 @@ FIX: @Client.on_message / @Client.on_chat_member_updated → @app.on_* (yahi mai
 """
 
 import re
-from pyrogram import filters
+from pyrogram import enums, filters
 from pyrogram.types import (
     ChatMemberUpdated, Message,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -134,7 +134,7 @@ async def on_new_member(client, update: ChatMemberUpdated):
                 chat_id=update.chat.id,
                 animation=gif,
                 caption=welcome_text,
-                parse_mode="html",
+                parse_mode=enums.ParseMode.HTML,
                 reply_markup=markup,
             )
             return
@@ -145,7 +145,7 @@ async def on_new_member(client, update: ChatMemberUpdated):
         await client.send_message(
             chat_id=update.chat.id,
             text=welcome_text,
-            parse_mode="html",
+            parse_mode=enums.ParseMode.HTML,
             reply_markup=markup,
         )
     except Exception:
@@ -176,7 +176,7 @@ async def setwel_cmd(client, message: Message):
             "• <code>/listwelgif</code> — GIFs ki list dekho\n"
             "• <code>/rmwelgif &lt;n&gt;</code> — GIF hatao"
             "</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     raw_input = message.text.split(None, 1)[1]
@@ -193,7 +193,7 @@ async def setwel_cmd(client, message: Message):
     if btns:
         confirm += f"\n\n🔘 <b>Buttons:</b> {len(btns)} added"
     confirm += "</blockquote>"
-    await message.reply(confirm, parse_mode="html", reply_markup=markup)
+    await message.reply(confirm, parse_mode=enums.ParseMode.HTML, reply_markup=markup)
 
 
 # ─── /stopwel ──────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ async def stopwel_cmd(client, message: Message):
     _toggle_welcome(message.chat.id, False)
     await message.reply(
         "<blockquote>🔕 Welcome <b>disabled</b> kar diya.</blockquote>",
-        parse_mode="html"
+        parse_mode=enums.ParseMode.HTML
     )
 
 
@@ -220,7 +220,7 @@ async def startwel_cmd(client, message: Message):
     _toggle_welcome(message.chat.id, True)
     await message.reply(
         "<blockquote>✅ Welcome <b>enabled</b> ho gaya!</blockquote>",
-        parse_mode="html"
+        parse_mode=enums.ParseMode.HTML
     )
 
 
@@ -236,7 +236,7 @@ async def resetwel_cmd(client, message: Message):
         f"<blockquote>🔄 Welcome reset ho gaya!\n\n"
         f"<b>Default message:</b>\n<code>{DEFAULT_WELCOME}</code>\n\n"
         f"Default GIFs bhi wapas aa gaye.</blockquote>",
-        parse_mode="html"
+        parse_mode=enums.ParseMode.HTML
     )
 
 
@@ -257,6 +257,6 @@ async def welshow_cmd(client, message: Message):
         f"<b>Preview:</b>\n{_fill(text, message.from_user, message.chat)}\n\n"
         f"<b>GIFs:</b> /listwelgif se dekho"
         f"</blockquote>",
-        parse_mode="html",
+        parse_mode=enums.ParseMode.HTML,
         reply_markup=_build_markup(btns),
     )
