@@ -1,174 +1,259 @@
-<div align="center">
-  <img src="https://files.catbox.moe/f3i3yi.png" alt="˹ʜᴀꜱɪɪ ᴍᴜꜱɪᴄ˼" width="400"/>
-  
-  # 🎵 ˹ʜᴀꜱɪɪ ᴍᴜꜱɪᴄ˼
-  
-  <p><b>A Powerful Telegram Music Player Bot</b></p>
-  
-  [![Telegram](https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram)](https://t.me/TheInfinityAI)
-  [![Telegram](https://img.shields.io/badge/Telegram-Support-blue?style=for-the-badge&logo=telegram)](https://t.me/Hasindu_Lakshan)
-  
-</div>
+# 🎵 HasiiMusicBot
+
+> Advanced Telegram Music Bot with YouTube streaming, live radio, and studio-quality audio playback in voice chats.  
+> Built with **Python**, **Pyrogram** & **PyTgCalls** — now with full **GIF Manager** support!
 
 ---
 
-## ✨ Features
+## 🎬 GIF Manager — Bot Se Seedha GIF Change Karo!
 
-- 🎵 **High Quality Music Streaming** - Crystal clear audio with STUDIO quality
-- 📻 **Live Radio Streaming** - 50+ international and local radio stations (Request)
-- 🎧 **YouTube Support** - Play music from YouTube links or search
-- 📝 **Queue System** - Manage multiple songs in queue
-- ⚡ **Fast & Reliable** - Built with Pyrogram and PyTgCalls
-- 🎛 **Admin Controls** - Pause, resume, skip, and stop controls
-- 👥 **User Authorization** - Authorized users can control playback
-- 📊 **Statistics** - Track bot usage and performance
-- 🔄 **Auto-Leave** - Automatically leaves inactive voice chats
+Har feature ke liye apna custom GIF set kar sakte ho — directly Telegram bot se, bina code touch kiye.  
+GIFs **MongoDB** mein save hote hain — bot restart ke baad bhi rehte hain.
 
 ---
 
-## 🚀 Deployment
+### 🟢 Start GIF
+Jab koi `/start` kare private chat mein — yeh GIF aayega.
 
-### ✔️ Prerequisites
+| Command | Kaam |
+|---|---|
+| `/setstartgif` | GIF reply karke send karo → add ho jaayega |
+| `/setstartgif naam` | GIF reply + custom naam |
+| `/rmstartgif <n>` | Number wali GIF remove karo |
+| `/liststartgif` | Saari start GIFs dekho |
 
-- Python 3.10+ installed
-- Deno & FFmpeg installed on your system
-- Required variables mentioned in sample.env
+---
+
+### 👋 Welcome GIF
+Jab koi naya member group join kare — yeh GIF welcome ke saath aayega.
+
+| Command | Kaam |
+|---|---|
+| `/setwelgif` | Welcome GIF add karo |
+| `/rmwelgif <n>` | Remove |
+| `/listwelgif` | List |
+
+**Welcome message bhi customize karo:**
+```
+/setwel Namaste {mention}! {chat_title} mein aapka swagat hai 🎉
+```
+**Placeholders:** `{mention}` `{first_name}` `{username}` `{chat_title}` `{id}`
+
+**Welcome on/off:**
+```
+/startwel   → Enable
+/stopwel    → Disable
+/resetwel   → Default pe wapas
+/welshow    → Current settings dekho
+```
+
+---
+
+### 💑 Couple GIF
+`/couple` aur `/couples` commands pe yeh GIF aayega.
+
+| Command | Kaam |
+|---|---|
+| `/setcouplegif` | Couple GIF add karo |
+| `/rmcouplegif <n>` | Remove |
+| `/listcouplegif` | List |
+
+**Couple Commands:**
+```
+/couple @user     → Kisi se couple bano
+/uncouple         → Breakup karo
+/mycouple         → Apna couple status dekho
+/couples          → Random couple from group
+/couplerank       → Top couples list
+```
+
+---
+
+### 😴 AFK GIF
+`/afk` karte waqt yeh GIF aayega.
+
+| Command | Kaam |
+|---|---|
+| `/setafkgif` | AFK GIF add karo |
+| `/rmafkgif <n>` | Remove |
+| `/listafkgif` | List |
+
+**AFK Commands:**
+```
+/afk [reason]   → AFK mode on (GIF ke saath)
+/back           → Manually wapas aao
+```
+> Auto-return bhi hota hai jab tum kuch message karo!  
+> Agar koi tumhe mention kare aur tum AFK ho — bot automatically batata hai.
+
+---
+
+### 🎵 Play GIF / Sticker
+`/play` command chalane pe yeh sticker/GIF aayega processing indicator ke taur par.  
+**Ab hardcoded nahi — bot se seedha change karo!**
+
+| Command | Kaam |
+|---|---|
+| `/setplaygif` | Play sticker/GIF add karo (reply karke) |
+| `/rmplaygif <n>` | Remove |
+| `/listplaygif` | List |
+
+> Sticker aur GIF dono support karta hai!
+
+---
+
+### 🏷️ TagAll Greeting GIFs
+Har greeting command ke saath apna alag GIF set karo.
+
+| GIF Type | Set Command | Tag Command |
+|---|---|---|
+| Good Morning 🌅 | `/setgmgif` | `/gmtag [msg]` |
+| Good Night 🌙 | `/setgngif` | `/gntag [msg]` |
+| Good Afternoon ☀️ | `/setgdgif` | `/gdtag [msg]` |
+| Good Evening 🌆 | `/setgevgif` | `/gevtag [msg]` |
+| Birthday 🎂 | `/setgbdgif` | `/gbdtag @user` |
+
+**List / Remove (example for Good Morning):**
+```
+/listgmgif        → List dekho
+/rmgmgif <n>      → Remove karo
+```
+
+**Other TagAll Commands:**
+```
+/tagall [msg]       → Sab members tag karo
+/tagadmins [msg]    → Sirf admins tag
+/stoptag            → Tag rokdo
+```
+
+---
+
+## 🎬 GIF Set Karne Ka Tarika
+
+1. **Bot mein koi GIF ya Sticker bhejo** (group ya private dono mein kaam karta hai)
+2. **Usi GIF ko reply karo** aur command likho:
+
+```
+/setplaygif             ← play ke liye
+/setafkgif meri-gif     ← afk ke liye (custom naam ke saath)
+/setcouplegif           ← couple ke liye
+```
+
+3. Done! ✅ Ab se wahi GIF use hoga.
+
+> **Permission:** Sirf **Owner / Sudo / Group Admin** GIF set/remove kar sakta hai.
+
+---
+
+## 🎵 Music Commands
+
+```
+/play <song name or URL>   → Song bajao
+/vplay <song>              → Video play karo
+/cplay <song>              → Linked channel mein play
+/pause                     → Pause
+/resume                    → Resume
+/skip                      → Agla song
+/stop                      → Band karo
+/queue                     → Queue dekho
+/loop                      → Loop toggle (off → single → queue)
+/shuffle                   → Queue shuffle karo
+/seek <seconds>            → Seek karo
+```
+
+---
+
+## ⚙️ Admin Controls
+
+```
+/auth @user        → User ko music commands use karne do (non-admin)
+/unauth @user      → Permission hatao
+/authlist          → Authorized users list
+/playmode          → Play mode toggle (admin only / everyone)
+/channelplay       → Channel play enable/disable
+```
+
+---
+
+## 🛡️ Sudo / Owner Commands
+
+```
+/broadcast <msg>   → Sab groups mein message bhejo
+/gban @user        → Global ban
+/ungban @user      → Global unban
+/sudolist          → Sudo users list
+/maintenance       → Maintenance mode
+/restart           → Bot restart
+```
+
+---
+
+## 🚀 Setup
 
 ### Requirements
-
-- Python 3.12+
-- MongoDB Database
-- Telegram Bot Token
-- Telegram API ID & Hash
-- Pyrogram String Session
-
-### Environment Variables
-
-Create a `.env` file with the following variables:
-
-```env
-API_ID=your_api_id
-API_HASH=your_api_hash
-BOT_TOKEN=your_bot_token
-MONGO_DB_URI=your_mongodb_uri
-LOGGER_ID=your_logger_group_id
-OWNER_ID=your_user_id
-STRING_SESSION=your_pyrogram_session
-COOKIE_URL=youtube_cookies_url (optional)
+```
+Python 3.10+
+MongoDB
+FFmpeg
 ```
 
-### Installation
-
-1. **Clone the repository**
-
+### Install
 ```bash
-git clone https://github.com/hasindu-nagolla/HasiiMusicBot
+git clone https://github.com/rajfflive/HasiiMusicBot
 cd HasiiMusicBot
-```
-
-2. **Install dependencies**
-
-```bash
 pip install -r requirements.txt
 ```
 
-3. **Set up environment variables**
-
-```bash
-cp sample.env .env
-# Edit .env with your values
+### Config (`config.py` ya Environment Variables)
+```env
+API_ID         = your_api_id
+API_HASH       = your_api_hash
+BOT_TOKEN      = your_bot_token
+OWNER_ID       = your_telegram_id
+MONGO_DB_URI   = mongodb://...
+STRING_SESSION = your_string_session
+SUPPORT_CHAT   = @your_support_group
 ```
 
-4. **Run the bot**
-
+### Run
 ```bash
-bash start
+python -m HasiiMusic
 ```
 
 ---
 
-## 📖 Commands
+## 📁 Project Structure
 
-### User Commands
-
-- `/play` - Play a song (YouTube URL or search query)
-- `/radio` - Browse and play live radio stations
-- `/queue` - View current queue
-- `/ping` - Check bot status
-- `/help` - Show help menu
-
-### Admin Commands
-
-- `/pause` - Pause current stream
-- `/resume` - Resume paused stream
-- `/skip` - Skip current track (also `/next`)
-- `/stop` - Stop playing and clear queue (also `/end`)
-- `/seek` - Seek to specific timestamp
-- `/reload` - Reload admin cache
-
-### Sudo Commands
-
-- `/stats` - View bot statistics
-- `/broadcast` - Broadcast message to all chats
-- `/addsudo` - Add sudo user
-- `/rmsudo` - Remove sudo user
-- `/gban` - Globally ban a user across all chats
-- `/ungban` - Remove global ban
-- `/maintenance` - Toggle maintenance mode
-- `/restart` - Restart the bot
-- `/logs` - Get bot logs
+```
+HasiiMusic/
+├── core/           → Bot, Calls, MongoDB, YouTube, Telegram core
+├── helpers/
+│   ├── gif_manager.py   ← GIF Manager (saari GIF logic yahan)
+│   └── ...
+├── plugins/
+│   ├── features/
+│   │   ├── afk.py       ← AFK + GIF
+│   │   ├── couple.py    ← Couple + GIF
+│   │   └── tagall.py    ← TagAll + Greeting GIFs
+│   ├── events/
+│   │   └── welcome.py   ← Welcome + GIF
+│   ├── information/
+│   │   └── start.py     ← Start + GIF
+│   └── playback-controls/
+│       └── play.py      ← Play + GIF/Sticker
+└── locales/        → Language files
+```
 
 ---
 
-## 🛠 Configuration
+## 🤝 Credits
 
-### Audio Quality Settings
-
-The bot streams audio at **STUDIO** quality (highest available) with:
-
-- **Codec**: Opus (best quality for music)
-- **Format**: WebM container for audio downloads
-- **Sample Rate**: 48kHz
-- **Channels**: Stereo
-- **Optimization**: Max 5 concurrent downloads, 1MB chunks
-
-### Customization
-
-- Modify language files in `HasiiMusic/locales/`
-- Customize thumbnails and images in `config.py`
-- Adjust queue limits and duration in `config.py`
+- Original base: [AnonXMusic](https://github.com/AnonymousX1025/AnonXMusic)
+- Customized by: [@rajfflive](https://github.com/rajfflive)
+- GIF Manager system added for full bot-side GIF control
 
 ---
 
-## 📞 Support & Contact
+## 📜 License
 
-- **Developer**: Hasindu Nagolla
-- **Telegram Channel**: [@TheInfinityAI](https://t.me/TheInfinityAI)
-- **Support Group**: [@Hasindu_Lakshan](https://t.me/Hasindu_Lakshan)
-- **GitHub**: [hasindu-nagolla](https://github.com/hasindu-nagolla)
-
----
-
-## 📝 Notes
-
-- Make sure your bot is admin in both the group and logger group
-- The assistant account will auto-join groups when needed for playback
-- Keep your `.env` file secure and never share it publicly
-- For YouTube downloads, cookies may be required for some videos
-- Radio streams are live - no duration limits or downloads needed
-
----
-
-## 🙏 Credits
-
-Special thanks to [AnonymousX1025](https://github.com/AnonymousX1025) for the original inspiration.
-
----
-
-<div align="center">
-  
-  ### Made with ❤️ by Hasindu Nagolla
-  
-  **© 2026 ˹ʜᴀꜱɪɪ ᴍᴜꜱɪᴄ˼. All rights reserved.**
-  
-</div>
+MIT License — Free to use and modify.
