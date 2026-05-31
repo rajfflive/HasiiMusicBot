@@ -19,7 +19,7 @@ import random
 import time
 from datetime import timedelta
 
-from pyrogram import filters
+from pyrogram import enums, filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
@@ -140,7 +140,7 @@ async def couple_cmd(client, message: Message):
             "<blockquote>💔 Mention ya reply karo jis se couple banana hai!\n\n"
             "Usage: <code>/couple @username</code>\n"
             "Ya kisi message ko reply karke <code>/couple</code> likho</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     if target.id == user.id:
         return await message.reply(
@@ -158,7 +158,7 @@ async def couple_cmd(client, message: Message):
             return await message.reply(
                 f"<blockquote>💕 Tum already {target.mention} ke saath couple ho!\n"
                 f"💖 Love: <b>{pct}%</b> {_love_bar(pct)}</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
         return await message.reply(
             "<blockquote>💔 Tum already ek couple mein ho! Pehle /uncouple karo.</blockquote>"
@@ -167,7 +167,7 @@ async def couple_cmd(client, message: Message):
     if get_couple(target.id):
         return await message.reply(
             f"<blockquote>💔 {target.mention} already kisi aur ke saath couple mein hai!</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     make_couple(user.id, target.id)
@@ -189,11 +189,11 @@ async def couple_cmd(client, message: Message):
 
     if gif:
         try:
-            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode=enums.ParseMode.HTML)
             return
         except Exception:
             pass
-    await message.reply(caption, parse_mode="html")
+    await message.reply(caption, parse_mode=enums.ParseMode.HTML)
 
 
 # ─── /uncouple ───────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ async def uncouple_cmd(client, message: Message):
         f"⏳ <b>{duration}</b> saath bitaye the.\n\n"
         f"<i>Dono ko aage ki zindagi mein khushiyaan milein 🌸</i>"
         f"</blockquote>",
-        parse_mode="html",
+        parse_mode=enums.ParseMode.HTML,
     )
 
 
@@ -253,7 +253,7 @@ async def mycouple_cmd(client, message: Message):
         f"⏳ Saath: <b>{_days_fmt(int(time.time()) - doc.get('since', int(time.time())))}</b>\n"
         f"💖 Love: <b>{pct}%</b>\n{_love_bar(pct)}"
         f"</blockquote>",
-        parse_mode="html",
+        parse_mode=enums.ParseMode.HTML,
     )
 
 
@@ -290,11 +290,11 @@ async def couples_random_cmd(client, message: Message):
 
     if gif:
         try:
-            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode=enums.ParseMode.HTML)
             return
         except Exception:
             pass
-    await message.reply(caption, parse_mode="html")
+    await message.reply(caption, parse_mode=enums.ParseMode.HTML)
 
 
 # ─── /couplerank ─────────────────────────────────────────────────────────────
@@ -326,4 +326,4 @@ async def couplerank_cmd(client, message: Message):
             text += f"{medal} ID#{pair[0]} ❤️ ID#{pair[1]} — <b>{_days_fmt(now - since)}</b> | 💖{pct}%\n"
     text += "</blockquote>"
 
-    await message.reply(text, parse_mode="html")
+    await message.reply(text, parse_mode=enums.ParseMode.HTML)
