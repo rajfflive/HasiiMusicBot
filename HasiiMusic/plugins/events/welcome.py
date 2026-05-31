@@ -29,7 +29,7 @@ from HasiiMusic.helpers.gif_manager import get_random_gif
 # { chat_id: { "welcome": str|None, "goodbye": str|None, "welcome_on": bool, "goodbye_on": bool } }
 _settings: dict[int, dict] = {}
 
-WELCOME_DELETE_DELAY = 86400  # 24 hours
+WELCOME_DELETE_DELAY = 120  # 24 hours
 
 DEFAULT_WELCOME = (
     "👋 Welcome to <b>{chat}</b>, {mention}!\n"
