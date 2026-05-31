@@ -1,21 +1,38 @@
 """
-TagAll Plugin — v2
+TagAll Plugin — v3 with GIF Manager
 Commands:
-  /tagall [msg]    - Tag all members, one per line with gap, shows who triggered
+  /tagall [msg]    - Tag all members
   /tagadmins [msg] - Tag only admins
   /stoptag         - Stop active tagging
-  /gmtag [msg]     - Good Morning tag
-  /gntag [msg]     - Good Night tag
-  /gdtag [msg]     - Good Afternoon tag
-  /gevtag [msg]    - Good Evening tag
-  /gbdtag @user    - Birthday tag for someone
+  /gmtag [msg]     - Good Morning tag with GIF
+  /gntag [msg]     - Good Night tag with GIF
+  /gdtag [msg]     - Good Afternoon tag with GIF
+  /gevtag [msg]    - Good Evening tag with GIF
+  /gbdtag @user    - Birthday tag for someone with GIF
+
+GIF Management (owner/sudo/admin only):
+  /setgmgif        - Reply to GIF → set for Good Morning
+  /setgngif        - Reply to GIF → set for Good Night
+  /setgdgif        - Reply to GIF → set for Good Afternoon
+  /setgevgif       - Reply to GIF → set for Good Evening
+  /setgbdgif       - Reply to GIF → set for Birthday
+  /listgmgif / /listgngif / etc. — list GIFs for each type
+  /rmgmgif <n>     - Remove a GIF by number (same for others)
 """
 
 import asyncio
 from pyrogram import enums, filters, types
 from HasiiMusic import app
+from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
 
 _active_tags: dict[int, bool] = {}
+
+# ─── Register GIF commands for each greeting type ────────────────────────────
+register_gif_commands(app, "gmtag", "gm")
+register_gif_commands(app, "gntag", "gn")
+register_gif_commands(app, "gdtag", "gd")
+register_gif_commands(app, "gevtag", "gev")
+register_gif_commands(app, "gbdtag", "gbd")
 
 
 async def _is_admin(chat_id: int, user_id: int) -> bool:
@@ -33,7 +50,14 @@ def _mention(user) -> str:
     return f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
 
 
-async def _do_tagall(chat_id: int, trigger_user, header_text: str, chunk_size: int = 4, delay: float = 1.5):
+async def _do_tagall(
+    chat_id: int,
+    trigger_user,
+    header_text: str,
+    gif_type: str = None,
+    chunk_size: int = 4,
+    delay: float = 1.5
+):
     members = []
     try:
         async for m in app.get_chat_members(chat_id):
@@ -59,13 +83,41 @@ async def _do_tagall(chat_id: int, trigger_user, header_text: str, chunk_size: i
     _active_tags[chat_id] = True
 
     trigger_line = f"📢 <b>{_mention(trigger_user)}</b> ne tag kiya:" if trigger_user else "📢 Tag:"
-    await app.send_message(
-        chat_id,
-        f"<blockquote>{trigger_line}\n{header_text}</blockquote>",
-        disable_notification=True,
-        disable_web_page_preview=True,
-        parse_mode="html"
-    )
+    header_msg = f"<blockquote>{trigger_line}\n{header_text}</blockquote>"
+
+    # Send GIF with header if gif_type is given
+    if gif_type:
+        gif = get_random_gif(gif_type)
+        if gif:
+            try:
+                await app.send_animation(
+                    chat_id, gif,
+                    caption=header_msg,
+                    parse_mode="html",
+                    disable_notification=True,
+                )
+            except Exception:
+                await app.send_message(
+                    chat_id, header_msg,
+                    disable_notification=True,
+                    disable_web_page_preview=True,
+                    parse_mode="html"
+                )
+        else:
+            await app.send_message(
+                chat_id, header_msg,
+                disable_notification=True,
+                disable_web_page_preview=True,
+                parse_mode="html"
+            )
+    else:
+        await app.send_message(
+            chat_id, header_msg,
+            disable_notification=True,
+            disable_web_page_preview=True,
+            parse_mode="html"
+        )
+
     await asyncio.sleep(0.8)
 
     for i in range(0, len(members), chunk_size):
@@ -134,7 +186,9 @@ async def tagall_cmd(_, message: types.Message):
         )
 
     custom_msg = " ".join(message.command[1:]) if len(message.command) > 1 else "Sabko tag kar raha hun!"
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, f"📣 {custom_msg}"))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, f"📣 {custom_msg}")
+    )
 
 
 # ─── /tagadmins ──────────────────────────────────────────────────────────────
@@ -183,7 +237,7 @@ async def tagadmins_cmd(_, message: types.Message):
     )
 
 
-# ─── Good Morning ────────────────────────────────────────────────────────────
+# ─── Good Morning ─────────────────────────────────────────────────────────────
 @app.on_message(filters.command("gmtag") & filters.group)
 async def gmtag_cmd(_, message: types.Message):
     try:
@@ -199,14 +253,16 @@ async def gmtag_cmd(_, message: types.Message):
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
-        f"🌅 <b>Good Morning, sab logo!</b> ☀️\n"
-        f"{'➤ ' + extra + chr(10) if extra else ''}"
-        f"Ek naya din hai, fresh start karo! 💪✨"
+        f"🌅 <b>Good Morning!</b> ☀️\n"
+        f"Uthho sab! Naya din aaya hai!\n"
+        f"{extra}"
     )
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, header))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, header, gif_type="gmtag")
+    )
 
 
-# ─── Good Night ──────────────────────────────────────────────────────────────
+# ─── Good Night ───────────────────────────────────────────────────────────────
 @app.on_message(filters.command("gntag") & filters.group)
 async def gntag_cmd(_, message: types.Message):
     try:
@@ -222,11 +278,13 @@ async def gntag_cmd(_, message: types.Message):
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
-        f"🌙 <b>Good Night, sab logo!</b> 😴⭐\n"
-        f"{'➤ ' + extra + chr(10) if extra else ''}"
-        f"Sweet dreams! 💤🌟"
+        f"🌙 <b>Good Night!</b> 💤\n"
+        f"Neend acchi aaye sabko!\n"
+        f"{extra}"
     )
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, header))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, header, gif_type="gntag")
+    )
 
 
 # ─── Good Afternoon ──────────────────────────────────────────────────────────
@@ -245,14 +303,16 @@ async def gdtag_cmd(_, message: types.Message):
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
-        f"☀️ <b>Good Afternoon, sab logo!</b> 🌤️\n"
-        f"{'➤ ' + extra + chr(10) if extra else ''}"
-        f"Din ka middle — energy high rakho! ⚡💪"
+        f"☀️ <b>Good Afternoon!</b> 🌤️\n"
+        f"Dopahar mubarak ho sabko!\n"
+        f"{extra}"
     )
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, header))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, header, gif_type="gdtag")
+    )
 
 
-# ─── Good Evening ─────────────────────────────────────────────────────────────
+# ─── Good Evening ────────────────────────────────────────────────────────────
 @app.on_message(filters.command("gevtag") & filters.group)
 async def gevtag_cmd(_, message: types.Message):
     try:
@@ -268,57 +328,56 @@ async def gevtag_cmd(_, message: types.Message):
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
-        f"🌆 <b>Good Evening, sab logo!</b> 🌇\n"
-        f"{'➤ ' + extra + chr(10) if extra else ''}"
-        f"Shaam ho gayi — relax karo! 🌙😊"
+        f"🌆 <b>Good Evening!</b> 🌇\n"
+        f"Shaam mubarak sabko!\n"
+        f"{extra}"
     )
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, header))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, header, gif_type="gevtag")
+    )
 
 
-# ─── Birthday Tag ─────────────────────────────────────────────────────────────
+# ─── Birthday ─────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("gbdtag") & filters.group)
-async def gbdtag_cmd(_, message: types.Message):
+async def gbdtag_cmd(client, message: types.Message):
     try:
         await message.delete()
     except Exception:
         pass
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
-        return await message.reply_text(
-            "<blockquote>❌ Sirf admins use kar sakte hain.</blockquote>",
-            parse_mode="html"
-        )
+        return
+
+    # Find birthday person
+    bday_user = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        bday_user = message.reply_to_message.from_user
+    elif message.entities:
+        for ent in message.entities:
+            if ent.type.value == "text_mention" and ent.user:
+                bday_user = ent.user
+                break
+            elif ent.type.value == "mention" and message.text:
+                uname = message.text[ent.offset + 1: ent.offset + ent.length]
+                try:
+                    bday_user = await client.get_users(uname)
+                    break
+                except Exception:
+                    pass
+
+    bday_name = bday_user.first_name if bday_user else "Kisi ka"
+    bday_mention = bday_user.mention if bday_user else "🎂"
+
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
             parse_mode="html"
         )
 
-    birthday_person = ""
-    if message.reply_to_message and message.reply_to_message.from_user:
-        birthday_person = _mention(message.reply_to_message.from_user)
-    elif message.entities:
-        for ent in message.entities:
-            if ent.type.value == "text_mention" and ent.user:
-                birthday_person = _mention(ent.user)
-                break
-            elif ent.type.value == "mention" and message.text:
-                uname = message.text[ent.offset + 1: ent.offset + ent.length]
-                try:
-                    u = await app.get_users(uname)
-                    birthday_person = _mention(u)
-                    break
-                except Exception:
-                    pass
-
-    if not birthday_person:
-        return await message.reply_text(
-            "<blockquote>❌ Kiske birthday hai? Mention karo ya reply karo!</blockquote>",
-            parse_mode="html"
-        )
-
     header = (
-        f"🎂 <b>Happy Birthday {birthday_person}!</b> 🎉🎈\n\n"
-        f"Sabko tag karke wish kara raha hun:\n"
-        f"🥳 Aao sab milke wish karo! ❤️"
+        f"🎂 <b>Birthday Mubarak {bday_mention}!</b> 🎉\n"
+        f"Sabse wish karo aaj ke birthday star ko! 🎁\n"
+        f"🥳 Happy Birthday {bday_name}! Bahut saari khushiyaan milein!"
     )
-    asyncio.create_task(_do_tagall(message.chat.id, message.from_user, header))
+    asyncio.create_task(
+        _do_tagall(message.chat.id, message.from_user, header, gif_type="gbdtag")
+    )
