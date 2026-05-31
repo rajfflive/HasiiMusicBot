@@ -1,6 +1,16 @@
-# ==============================================================================
-# play.py - Main Play Command Handler
-# ==============================================================================
+"""
+play.py — v3 with GIF Manager (Bot se seedha GIF change karo!)
+
+/play, /playforce, /cplay, /vplay etc. — same as before
+
+Play GIF Management (owner/sudo only — private ya group mein):
+  /setplaygif      - Reply to GIF/sticker → add to play list
+  /setplaygif naam - Reply + custom name
+  /rmplaygif <n>   - Remove by number
+  /listplaygif     - See all play GIFs/stickers
+
+Ab hardcoded sticker IDs ki jagah MongoDB se GIF/sticker aayega!
+"""
 
 from pyrogram import filters, types
 from pyrogram.errors import (
@@ -11,29 +21,46 @@ from pyrogram.errors import (
 from HasiiMusic import tune, app, config, db, lang, queue, tg, yt
 from HasiiMusic.helpers import buttons, utils
 from HasiiMusic.helpers._play import checkUB
+from HasiiMusic.helpers.gif_manager import (
+    get_random_gif,
+    register_gif_commands,
+    get_gifs,
+    add_gif,
+    remove_gif,
+    list_gifs_text,
+    is_owner_or_sudo,
+    extract_file_id,
+)
 import asyncio
 import logging
 import random
 
 logger = logging.getLogger(__name__)
 
-# ── Sticker IDs — /play karte hi bheji jaati hain ────────────────────────────
-PLAY_STICKERS: list[str] = [
-    "CAACAgUAAxkBAAFK2l9qGCwP-906O81HLo8pxYoR7SdStAACXyAAAkfhyVSX1A2fYeap8DsE",
-    "CAACAgUAAxkBAAFK2mFqGCwUFZFdBYmV-ubGzdQV6Z0PAwACySAAAiY8wFQqWC8co8TsbjsE",
-]
+# ─── Register /setplaygif, /rmplaygif, /listplaygif ──────────────────────────
+# Note: play GIF sirf owner/sudo set kar sakta hai (private ya group dono mein)
+register_gif_commands(app, "play", "play")
 
 
-async def send_play_sticker(chat_id: int) -> None:
-    if not PLAY_STICKERS:
+async def send_play_gif(chat_id: int) -> None:
+    """Send a random play GIF/sticker. Falls back to hardcoded stickers."""
+    gif = get_random_gif("play")
+    if not gif:
         return
-    for sticker_id in random.sample(PLAY_STICKERS, len(PLAY_STICKERS)):
-        try:
-            await app.send_sticker(chat_id, sticker_id)
-            return
-        except Exception as e:
-            logger.debug(f"[Play] Sticker failed: {e}")
-            continue
+
+    # Try as sticker first (for sticker file_ids)
+    try:
+        await app.send_sticker(chat_id, gif)
+        return
+    except Exception:
+        pass
+
+    # Try as animation/GIF
+    try:
+        await app.send_animation(chat_id, gif)
+        return
+    except Exception:
+        pass
 
 
 async def safe_edit(message, text, **kwargs) -> bool:
@@ -97,8 +124,8 @@ async def play_hndlr(
     except Exception:
         pass
 
-    # ── Sticker — processing indicator, emoji nahi ───────────────────────────
-    await send_play_sticker(m.chat.id)
+    # ── Play GIF — processing indicator ──────────────────────────────────────
+    await send_play_gif(m.chat.id)
 
     chat_id = m.chat.id
     message_chat_id = m.chat.id
@@ -263,7 +290,6 @@ async def play_hndlr(
             video=getattr(file, "video", False),
         )
         if not file.file_path:
-            # Original style (image 3) — lang file ka error_no_file
             await safe_edit(sent, m.lang["error_no_file"].format(config.SUPPORT_CHAT))
             return
 
@@ -274,27 +300,23 @@ async def play_hndlr(
             media=file,
             message_chat_id=message_chat_id if chat_id != message_chat_id else None,
         )
-        # Koi emoji react nahi — sirf play
     except Exception as e:
-        error_msg = str(e)
-        if "bot" in error_msg.lower() or "sign in" in error_msg.lower():
-            await safe_edit(sent,
-                "<blockquote>❌ YouTube bot detection triggered.\n\n"
-                "• Update cookies using /scook\n"
-                "• Wait a few minutes and try again\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>"
-            )
-        else:
-            await safe_edit(sent, m.lang["error_no_file"].format(config.SUPPORT_CHAT))
+        logger.error(f"[Play] play_media failed: {e}")
+        await safe_edit(sent, m.lang["error_no_file"].format(config.SUPPORT_CHAT))
         return
 
-    if not tracks:
-        return
-    added = playlist_to_queue(chat_id, tracks)
+    if tracks:
+        added = playlist_to_queue(chat_id, tracks)
+        try:
+            await app.send_message(
+                chat_id=m.chat.id,
+                text=m.lang["playlist_queued"].format(len(tracks)) + added,
+            )
+        except Exception:
+            pass
+
     try:
-        await app.send_message(
-            chat_id=m.chat.id,
-            text=m.lang["playlist_queued"].format(len(tracks)) + added,
-        )
+        from HasiiMusic import preload
+        asyncio.create_task(preload.start_preload(chat_id, count=2))
     except Exception:
         pass
