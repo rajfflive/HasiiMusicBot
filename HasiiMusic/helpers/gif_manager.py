@@ -201,7 +201,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
       register_gif_commands(app, "play", "play")
       → /setplaygif, /rmplaygif, /listplaygif
     """
-    from pyrogram import filters
+    from pyrogram import enums, filters
 
     set_cmd  = f"set{cmd_prefix}gif"
     rm_cmd   = f"rm{cmd_prefix}gif"
@@ -214,7 +214,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
         if not await is_owner_sudo_or_admin(client, message.chat.id, message.from_user.id):
             return await message.reply(
                 "<blockquote>❌ Sirf owner/sudo/admin yeh kar sakte hain.</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
         src = message.reply_to_message or message
@@ -228,7 +228,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
                 f"Ya ek custom naam bhi de sakte ho:\n"
                 f"<code>/{set_cmd} meri-gif</code>"
                 f"</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
         custom_name = " ".join(message.command[1:]).strip() if len(message.command) > 1 else fname
@@ -244,12 +244,12 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
                 f"📊 Total ab: <b>{len(gifs)}</b> GIFs\n\n"
                 f"<code>/{list_cmd}</code> se list dekho"
                 f"</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
         else:
             await message.reply(
                 "<blockquote>⚠️ Yeh GIF pehle se list mein hai!</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
     @app_instance.on_message(filters.command(rm_cmd))
@@ -259,7 +259,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
         if not await is_owner_sudo_or_admin(client, message.chat.id, message.from_user.id):
             return await message.reply(
                 "<blockquote>❌ Sirf owner/sudo/admin yeh kar sakte hain.</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
         if len(message.command) < 2:
@@ -269,7 +269,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
                 f"Usage: <code>/{rm_cmd} &lt;number&gt;</code>\n"
                 f"<code>/{list_cmd}</code> se numbers dekho"
                 f"</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
         try:
@@ -277,7 +277,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
         except ValueError:
             return await message.reply(
                 f"<blockquote>❌ Valid number do! Example: <code>/{rm_cmd} 2</code></blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
         removed = remove_gif(gif_type, idx)
@@ -289,7 +289,7 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
                 f"📛 Naam: <b>{removed.get('name', 'unnamed')}</b>\n"
                 f"📊 Bacha: <b>{len(remaining)}</b> GIFs"
                 f"</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
         else:
             await message.reply(
@@ -297,10 +297,10 @@ def register_gif_commands(app_instance, gif_type: str, cmd_prefix: str):
                 f"❌ Number {idx} exist nahi karta.\n"
                 f"<code>/{list_cmd}</code> se sahi number dekho"
                 f"</blockquote>",
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
 
     @app_instance.on_message(filters.command(list_cmd))
     async def _list_gif(client, message):
         text = list_gifs_text(gif_type)
-        await message.reply(text, parse_mode="html")
+        await message.reply(text, parse_mode=enums.ParseMode.HTML)
