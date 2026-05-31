@@ -68,7 +68,7 @@ async def _do_tagall(
         await app.send_message(
             chat_id,
             f"<blockquote>❌ Error: {e}</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
 
@@ -76,7 +76,7 @@ async def _do_tagall(
         await app.send_message(
             chat_id,
             "<blockquote>❌ Koi member nahi mila.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
 
@@ -93,7 +93,7 @@ async def _do_tagall(
                 await app.send_animation(
                     chat_id, gif,
                     caption=header_msg,
-                    parse_mode="html",
+                    parse_mode=enums.ParseMode.HTML,
                     disable_notification=True,
                 )
             except Exception:
@@ -101,21 +101,21 @@ async def _do_tagall(
                     chat_id, header_msg,
                     disable_notification=True,
                     disable_web_page_preview=True,
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
         else:
             await app.send_message(
                 chat_id, header_msg,
                 disable_notification=True,
                 disable_web_page_preview=True,
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
     else:
         await app.send_message(
             chat_id, header_msg,
             disable_notification=True,
             disable_web_page_preview=True,
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     await asyncio.sleep(0.8)
@@ -133,7 +133,7 @@ async def _do_tagall(
                 chat_id, "\n".join(lines).strip(),
                 disable_notification=True,
                 disable_web_page_preview=True,
-                parse_mode="html"
+                parse_mode=enums.ParseMode.HTML
             )
         except Exception:
             pass
@@ -156,12 +156,12 @@ async def stoptag_cmd(_, message: types.Message):
         await app.send_message(
             message.chat.id,
             "<blockquote>🛑 <b>Tag stopped.</b></blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     else:
         await message.reply_text(
             "<blockquote>ℹ️ Koi active tag nahi hai.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
 
@@ -177,12 +177,12 @@ async def tagall_cmd(_, message: types.Message):
     if not await _is_admin(message.chat.id, message.from_user.id):
         return await message.reply_text(
             "<blockquote>❌ Sirf admins /tagall use kar sakte hain.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Pehle se tag chal raha hai. /stoptag karo.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     custom_msg = " ".join(message.command[1:]) if len(message.command) > 1 else "Sabko tag kar raha hun!"
@@ -201,7 +201,7 @@ async def tagadmins_cmd(_, message: types.Message):
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
         return await message.reply_text(
             "<blockquote>❌ Sirf admins use kar sakte hain.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     custom_msg = " ".join(message.command[1:]) if len(message.command) > 1 else "Admins ko tag!"
@@ -213,13 +213,13 @@ async def tagadmins_cmd(_, message: types.Message):
     except Exception as e:
         return await message.reply_text(
             f"<blockquote>❌ Error: {e}</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     if not admins:
         return await message.reply_text(
             "<blockquote>❌ Koi admin nahi mila.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     lines = [
@@ -233,7 +233,7 @@ async def tagadmins_cmd(_, message: types.Message):
         "\n".join(lines).strip(),
         disable_notification=True,
         disable_web_page_preview=True,
-        parse_mode="html"
+        parse_mode=enums.ParseMode.HTML
     )
 
 
@@ -249,7 +249,7 @@ async def gmtag_cmd(_, message: types.Message):
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
@@ -274,7 +274,7 @@ async def gntag_cmd(_, message: types.Message):
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
@@ -299,7 +299,7 @@ async def gdtag_cmd(_, message: types.Message):
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
@@ -324,7 +324,7 @@ async def gevtag_cmd(_, message: types.Message):
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
     extra = " ".join(message.command[1:]) if len(message.command) > 1 else ""
     header = (
@@ -370,7 +370,7 @@ async def gbdtag_cmd(client, message: types.Message):
     if _active_tags.get(message.chat.id):
         return await message.reply_text(
             "<blockquote>⚠️ Tag chal raha hai. /stoptag karo pehle.</blockquote>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
     header = (
