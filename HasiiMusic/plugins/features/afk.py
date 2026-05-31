@@ -6,7 +6,7 @@ Commands:
   /afk [reason]   - Set yourself as AFK
   /afkoff         - Manually remove your AFK status (also auto-removed on any message)
   /afklist        - Show all currently AFK members in this group
-  /owner          - Show bot owner info
+  /owner          - Show group owner info
 
 Note: When an AFK user is mentioned, the bot replies with an AFK gif (NOT couple gif).
 Auto-unset: AFK removed when the AFK user sends any message.
@@ -57,17 +57,6 @@ async def _auto_delete(msg: Message, delay: int = AFK_DELETE_DELAY):
         await msg.delete()
     except Exception:
         pass
-
-
-async def _get_owner_id() -> int | None:
-    """Return the first owner/creator of the bot (from config or env)."""
-    try:
-        from HasiiMusic import OWNER_ID
-        if isinstance(OWNER_ID, (list, tuple)):
-            return OWNER_ID[0]
-        return int(OWNER_ID)
-    except Exception:
-        return None
 
 
 # ── /afk ─────────────────────────────────────────────────────────────────────
@@ -179,40 +168,48 @@ async def cmd_afklist(_, message: Message):
 
 # ── /owner ────────────────────────────────────────────────────────────────────
 
-@app.on_message(filters.command("owner"))
+@app.on_message(filters.command("owner") & filters.group)
 async def cmd_owner(_, message: Message):
-    owner_id = await _get_owner_id()
+    chat_id = message.chat.id
 
-    if not owner_id:
+    # Find the group creator (OWNER status)
+    owner_user = None
+    try:
+        async for member in app.get_chat_members(chat_id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+            if member.status == enums.ChatMemberStatus.OWNER and member.user:
+                owner_user = member.user
+                break
+    except Exception as e:
         sent = await message.reply(
-            "<blockquote>⚠️ Owner not configured in bot settings.</blockquote>",
+            f"<blockquote>❌ <b>Failed to fetch group owner!</b>\n"
+            f"Make sure I am an admin.\n<code>{e}</code></blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
         asyncio.create_task(_auto_delete(sent, 30))
         return
 
-    try:
-        owner = await app.get_users(owner_id)
-        name = (owner.first_name or "Owner").replace("<", "&lt;").replace(">", "&gt;")
-        username = f"@{owner.username}" if owner.username else "No username"
+    if not owner_user:
+        sent = await message.reply(
+            "<blockquote>⚠️ Could not find this group's owner.</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
+        asyncio.create_task(_auto_delete(sent, 30))
+        return
 
-        text = (
-            f"<blockquote>"
-            f"👑 <b>Bot Owner</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"👤 <b>Name:</b> <a href='tg://user?id={owner.id}'>{name}</a>\n"
-            f"🔗 <b>Username:</b> {username}\n"
-            f"🆔 <b>ID:</b> <code>{owner.id}</code>"
-            f"</blockquote>"
-        )
-    except Exception:
-        text = (
-            f"<blockquote>"
-            f"👑 <b>Bot Owner</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 <b>ID:</b> <code>{owner_id}</code>"
-            f"</blockquote>"
-        )
+    name = (owner_user.first_name or "Owner").replace("<", "&lt;").replace(">", "&gt;")
+    username = f"@{owner_user.username}" if owner_user.username else "No username"
+    chat_name = (message.chat.title or "This Group").replace("<", "&lt;").replace(">", "&gt;")
+
+    text = (
+        f"<blockquote>"
+        f"👑 <b>Group Owner</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🏠 <b>Group:</b> {chat_name}\n"
+        f"👤 <b>Owner:</b> <a href='tg://user?id={owner_user.id}'>{name}</a>\n"
+        f"🔗 <b>Username:</b> {username}\n"
+        f"🆔 <b>ID:</b> <code>{owner_user.id}</code>"
+        f"</blockquote>"
+    )
 
     sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
     asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
@@ -250,7 +247,6 @@ async def afk_watcher(_, message: Message):
     if message.entities:
         for ent in message.entities:
             if ent.type == enums.MessageEntityType.MENTION:
-                # @username mention
                 username = message.text[ent.offset + 1: ent.offset + ent.length]
                 try:
                     u = await app.get_users(username)
@@ -269,8 +265,7 @@ async def afk_watcher(_, message: Message):
             data = _afk_users[uid]
             elapsed = _elapsed(data["since"])
 
-            # ── FIX: use "afk" gif type, NOT "couple" ──
-            gif = get_random_gif("afk")
+            gif = get_random_gif("afk")  # AFK gif, NOT couple gif
 
             try:
                 u = await app.get_users(uid)
@@ -300,4 +295,3 @@ async def afk_watcher(_, message: Message):
                 sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
 
             asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
-
