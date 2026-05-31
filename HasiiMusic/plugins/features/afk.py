@@ -1,56 +1,57 @@
 """
-AFK Plugin — v5 FINAL (All English)
+AFK Plugin — v3 FINAL (All English)
 Place at: HasiiMusic/plugins/features/afk.py
 
 Commands:
-  /afk [reason]   - Go AFK with GIF + styled message (auto-deletes in 1 min)
-  /back           - Manually return from AFK
-  /owner          - Show GROUP owner info + AFK status
+  /afk [reason]   - Set yourself as AFK
+  /afkoff         - Manually remove your AFK status (also auto-removed on any message)
+  /afklist        - Show all currently AFK members in this group
+  /owner          - Show bot owner info
 
-GIF Management:
-  /setafkgif, /rmafkgif <n>, /listafkgif
+Note: When an AFK user is mentioned, the bot replies with an AFK gif (NOT couple gif).
+Auto-unset: AFK removed when the AFK user sends any message.
 """
 
 import asyncio
 import time
 from datetime import timedelta
 
-from pyrogram import enums, filters
+from pyrogram import enums, filters, types
 from pyrogram.types import Message
-from pymongo import MongoClient as PyMongoClient
-
-from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
-
-try:
-    from HasiiMusic.core.mongo import mongodb as _db
-except Exception:
-    import os
-    _c = PyMongoClient(os.getenv("MONGO_DB_URI", "mongodb://localhost:27017"))
-    _db = _c["HasiiMusicBot"]
 
 from HasiiMusic import app
+from HasiiMusic.helpers.gif_manager import get_random_gif
 
-afk_col = _db["afk_users"]
-AFK_DELETE_DELAY = 60
+# ── Storage ──────────────────────────────────────────────────────────────────
+# { user_id: { "reason": str, "since": float, "chat_id": int } }
+_afk_users: dict[int, dict] = {}
+
+AFK_DELETE_DELAY = 86400  # 24 hours
 
 
-def _fmt_time(seconds: int) -> str:
-    td = timedelta(seconds=max(0, int(seconds)))
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _mention(user) -> str:
+    name = (user.first_name or "User").replace("<", "&lt;").replace(">", "&gt;")
+    return f"<a href='tg://user?id={user.id}'>{name}</a>"
+
+
+def _elapsed(since: float) -> str:
+    secs = int(time.time() - since)
+    delta = timedelta(seconds=secs)
+    hours, remainder = divmod(delta.seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
     parts = []
-    if td.days:
-        parts.append(f"{td.days}d")
-    h, r = divmod(td.seconds, 3600)
-    m, s = divmod(r, 60)
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if not parts:
-        parts.append(f"{s}s")
-    return " ".join(parts)
+    if delta.days:
+        parts.append(f"{delta.days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    return " ".join(parts) if parts else "just now"
 
 
-async def _auto_delete(msg, delay: int = AFK_DELETE_DELAY):
+async def _auto_delete(msg: Message, delay: int = AFK_DELETE_DELAY):
     await asyncio.sleep(delay)
     try:
         await msg.delete()
@@ -58,113 +59,56 @@ async def _auto_delete(msg, delay: int = AFK_DELETE_DELAY):
         pass
 
 
-def is_afk(user_id: int):
+async def _get_owner_id() -> int | None:
+    """Return the first owner/creator of the bot (from config or env)."""
     try:
-        return afk_col.find_one({"user_id": user_id})
+        from HasiiMusic import OWNER_ID
+        if isinstance(OWNER_ID, (list, tuple)):
+            return OWNER_ID[0]
+        return int(OWNER_ID)
     except Exception:
         return None
 
 
-def set_afk(user_id: int, reason: str):
-    afk_col.update_one(
-        {"user_id": user_id},
-        {"$set": {"reason": reason, "since": int(time.time())}},
-        upsert=True,
-    )
+# ── /afk ─────────────────────────────────────────────────────────────────────
 
-
-def clear_afk(user_id: int):
-    afk_col.delete_one({"user_id": user_id})
-
-
-async def _send_afk_notify(client, chat_id, reply_to_msg, target, doc):
-    duration = _fmt_time(int(time.time()) - doc["since"])
-    reason = doc.get("reason", "No reason given.")
-
-    full_msg = (
-        f"<blockquote>"
-        f"⚠️ <b>{target.first_name} is currently AFK!</b>\n\n"
-        f"⏰ <b>Away for:</b> {duration}\n\n"
-        f"<i>They will reply when they return 🌙</i>"
-        f"</blockquote>\n"
-        f"<blockquote>📝 <b>Reason:</b>\n{reason}</blockquote>"
-    )
-
-    gif = get_random_gif("afk")
-    sent = None
-
-    if gif:
-        try:
-            sent = await client.send_animation(
-                chat_id, gif,
-                caption=full_msg,
-                parse_mode=enums.ParseMode.HTML,
-            )
-        except Exception:
-            pass
-
-    if not sent:
-        try:
-            if reply_to_msg:
-                sent = await reply_to_msg.reply(full_msg, parse_mode=enums.ParseMode.HTML)
-            else:
-                sent = await client.send_message(chat_id, full_msg, parse_mode=enums.ParseMode.HTML)
-        except Exception:
-            pass
-
-    if sent:
-        asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
-
-
-try:
-    register_gif_commands(app, "afk", "afk")
-except Exception:
-    pass
-
-
-@app.on_message(filters.command("afk") & (filters.group | filters.private))
-async def afk_cmd(client, message: Message):
+@app.on_message(filters.command("afk") & filters.group)
+async def cmd_afk(_, message: Message):
     user = message.from_user
     if not user:
         return
 
-    reason = " ".join(message.command[1:]).strip() if len(message.command) > 1 else "No reason given."
-    set_afk(user.id, reason)
+    reason = " ".join(message.command[1:]).strip() or "No reason given"
 
-    full_msg = (
-        f"<blockquote>"
-        f"😴 <b>{user.first_name} is now AFK!</b>\n\n"
-        f"╔══════════════════╗\n"
-        f"║  💤  A F K  M O D E  💤  ║\n"
-        f"╚══════════════════╝\n\n"
-        f"👤 <b>User:</b> {user.mention}\n"
-        f"⏰ <b>Since:</b> Just now\n\n"
-        f"<i>Until they reply, consider them AFK 🌙</i>"
-        f"</blockquote>\n"
-        f"<blockquote>📝 <b>Reason:</b>\n{reason}</blockquote>"
-    )
+    _afk_users[user.id] = {
+        "reason": reason,
+        "since": time.time(),
+        "chat_id": message.chat.id,
+    }
 
     gif = get_random_gif("afk")
-    sent = None
+    text = (
+        f"<blockquote>"
+        f"😴 <b>{_mention(user)} is now AFK!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Reason:</b> {reason}\n"
+        f"⏰ <b>Since:</b> just now"
+        f"</blockquote>"
+    )
 
-    if gif:
-        try:
-            sent = await client.send_animation(
-                message.chat.id, gif,
-                caption=full_msg,
+    try:
+        if gif:
+            sent = await message.reply_animation(
+                gif,
+                caption=text,
                 parse_mode=enums.ParseMode.HTML,
             )
-        except Exception:
-            pass
+        else:
+            sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+    except Exception:
+        sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
 
-    if not sent:
-        try:
-            sent = await message.reply(full_msg, parse_mode=enums.ParseMode.HTML)
-        except Exception:
-            pass
-
-    if sent:
-        asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+    asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
 
     try:
         await message.delete()
@@ -172,161 +116,188 @@ async def afk_cmd(client, message: Message):
         pass
 
 
-@app.on_message(filters.command("back") & (filters.group | filters.private))
-async def back_cmd(client, message: Message):
+# ── /afkoff ───────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("afkoff") & filters.group)
+async def cmd_afkoff(_, message: Message):
     user = message.from_user
     if not user:
         return
 
-    doc = is_afk(user.id)
-    if not doc:
-        return await message.reply(
-            "<blockquote>ℹ️ You were not in AFK mode.</blockquote>",
-            parse_mode=enums.ParseMode.HTML
-        )
-
-    duration = _fmt_time(int(time.time()) - doc["since"])
-    clear_afk(user.id)
-    await message.reply(
-        f"<blockquote>"
-        f"✅ <b>Welcome back, {user.mention}!</b>\n\n"
-        f"⏳ You were AFK for <b>{duration}</b>.\n"
-        f"<i>Great to have you back! 🎉</i>"
-        f"</blockquote>",
-        parse_mode=enums.ParseMode.HTML,
-    )
-
-
-@app.on_message(filters.group & ~filters.bot & ~filters.command(["afk", "back"]))
-async def auto_back(client, message: Message):
-    if not message.from_user:
-        return
-
-    doc = is_afk(message.from_user.id)
-    if not doc:
-        return
-
-    duration = _fmt_time(int(time.time()) - doc["since"])
-    clear_afk(message.from_user.id)
-
-    try:
+    if user.id not in _afk_users:
         sent = await message.reply(
-            f"<blockquote>"
-            f"✅ <b>Welcome back, {message.from_user.mention}!</b>\n\n"
-            f"⏳ You were AFK for <b>{duration}</b>.\n"
-            f"<i>Great to have you back! 🎉</i>"
-            f"</blockquote>",
+            "<blockquote>ℹ️ You are not AFK right now.</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
-    except Exception:
-        pass
-
-
-@app.on_message(filters.group & ~filters.bot, group=10)
-async def mention_check(client, message: Message):
-    if not message.from_user:
+        asyncio.create_task(_auto_delete(sent, 30))
         return
 
-    targets = []
-
-    if message.reply_to_message and message.reply_to_message.from_user:
-        targets.append(message.reply_to_message.from_user)
-
-    text = message.text or message.caption or ""
-    entities = list(message.entities or []) + list(message.caption_entities or [])
-
-    for ent in entities:
-        try:
-            etype = ent.type.value if hasattr(ent.type, "value") else str(ent.type)
-        except Exception:
-            continue
-
-        if etype == "text_mention" and ent.user:
-            targets.append(ent.user)
-        elif etype == "mention" and text:
-            uname = text[ent.offset + 1: ent.offset + ent.length]
-            if uname:
-                try:
-                    u = await client.get_users(uname)
-                    if u:
-                        targets.append(u)
-                except Exception:
-                    pass
-
-    seen_ids = set()
-    for target in targets:
-        if not target:
-            continue
-        if getattr(target, "is_bot", False):
-            continue
-        if target.id == message.from_user.id:
-            continue
-        if target.id in seen_ids:
-            continue
-        seen_ids.add(target.id)
-
-        doc = is_afk(target.id)
-        if not doc:
-            continue
-
-        await _send_afk_notify(client, message.chat.id, message, target, doc)
-
-
-@app.on_message(filters.command("owner") & filters.group)
-async def owner_cmd(client, message: Message):
-    chat_name = getattr(message.chat, "title", None) or "This Group"
-
-    owner = None
-    try:
-        async for member in client.get_chat_members(
-            message.chat.id, filter=enums.ChatMembersFilter.OWNERS
-        ):
-            owner = member.user
-            break
-    except Exception:
-        pass
-
-    if not owner:
-        try:
-            async for member in client.get_chat_members(
-                message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS
-            ):
-                if member.status == enums.ChatMemberStatus.OWNER:
-                    owner = member.user
-                    break
-        except Exception:
-            pass
-
-    if not owner:
-        return await message.reply(
-            "<blockquote>❌ <b>Could not find the group owner!</b>\n\nMake sure the bot has admin rights.</blockquote>",
-            parse_mode=enums.ParseMode.HTML
-        )
-
-    owner_name = owner.first_name or "Owner"
-    owner_username = f"@{owner.username}" if owner.username else "No username"
-    owner_mention = owner.mention
-
-    afk_doc = is_afk(owner.id)
-    if afk_doc:
-        duration = _fmt_time(int(time.time()) - afk_doc["since"])
-        afk_status = f"💤 AFK since {duration} ago"
-    else:
-        afk_status = "✅ Online"
+    data = _afk_users.pop(user.id)
+    elapsed = _elapsed(data["since"])
 
     text = (
         f"<blockquote>"
-        f"👑 <b>Group Owner</b>\n\n"
-        f"🏠 <b>Group:</b> {chat_name}\n"
+        f"✅ <b>{_mention(user)} is back!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{owner_mention}\n\n"
-        f"📛 <b>Name:</b> {owner_name}\n"
-        f"🔗 <b>Username:</b> {owner_username}\n"
-        f"🆔 <b>ID:</b> <code>{owner.id}</code>\n"
-        f"📶 <b>Status:</b> {afk_status}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Treat the group owner with respect! 👑</i>"
+        f"⏱ <b>Was AFK for:</b> {elapsed}\n"
+        f"📝 <b>Reason was:</b> {data['reason']}"
         f"</blockquote>"
     )
-    await message.reply(text, parse_mode=enums.ParseMode.HTML)
+    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+# ── /afklist ──────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("afklist") & filters.group)
+async def cmd_afklist(_, message: Message):
+    if not _afk_users:
+        sent = await message.reply(
+            "<blockquote>✅ No one is AFK right now!</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
+        asyncio.create_task(_auto_delete(sent, 30))
+        return
+
+    lines = [f"😴 <b>AFK Members ({len(_afk_users)})</b>\n━━━━━━━━━━━━━━━━━━"]
+    for uid, data in _afk_users.items():
+        elapsed = _elapsed(data["since"])
+        lines.append(
+            f"• <a href='tg://user?id={uid}'>User {uid}</a> — {elapsed} ago\n"
+            f"  📝 {data['reason']}"
+        )
+
+    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
+    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+
+
+# ── /owner ────────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("owner"))
+async def cmd_owner(_, message: Message):
+    owner_id = await _get_owner_id()
+
+    if not owner_id:
+        sent = await message.reply(
+            "<blockquote>⚠️ Owner not configured in bot settings.</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
+        asyncio.create_task(_auto_delete(sent, 30))
+        return
+
+    try:
+        owner = await app.get_users(owner_id)
+        name = (owner.first_name or "Owner").replace("<", "&lt;").replace(">", "&gt;")
+        username = f"@{owner.username}" if owner.username else "No username"
+
+        text = (
+            f"<blockquote>"
+            f"👑 <b>Bot Owner</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Name:</b> <a href='tg://user?id={owner.id}'>{name}</a>\n"
+            f"🔗 <b>Username:</b> {username}\n"
+            f"🆔 <b>ID:</b> <code>{owner.id}</code>"
+            f"</blockquote>"
+        )
+    except Exception:
+        text = (
+            f"<blockquote>"
+            f"👑 <b>Bot Owner</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 <b>ID:</b> <code>{owner_id}</code>"
+            f"</blockquote>"
+        )
+
+    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+    asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+
+
+# ── Auto-detect: AFK user mentioned ──────────────────────────────────────────
+
+@app.on_message(filters.group & ~filters.bot)
+async def afk_watcher(_, message: Message):
+    if not message.from_user:
+        return
+
+    sender_id = message.from_user.id
+
+    # ── Auto-unset if AFK user sends a message ────────────────────────────
+    if sender_id in _afk_users:
+        data = _afk_users.pop(sender_id)
+        elapsed = _elapsed(data["since"])
+        text = (
+            f"<blockquote>"
+            f"✅ <b>{_mention(message.from_user)} is back!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⏱ <b>Was AFK for:</b> {elapsed}\n"
+            f"📝 <b>Reason was:</b> {data['reason']}"
+            f"</blockquote>"
+        )
+        sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+        return  # Don't process mentions in the same message
+
+    # ── Check if any mentioned user is AFK ───────────────────────────────
+    mentioned_ids: list[int] = []
+
+    # Collect from entities
+    if message.entities:
+        for ent in message.entities:
+            if ent.type == enums.MessageEntityType.MENTION:
+                # @username mention
+                username = message.text[ent.offset + 1: ent.offset + ent.length]
+                try:
+                    u = await app.get_users(username)
+                    mentioned_ids.append(u.id)
+                except Exception:
+                    pass
+            elif ent.type == enums.MessageEntityType.TEXT_MENTION and ent.user:
+                mentioned_ids.append(ent.user.id)
+
+    # Also check reply-to
+    if message.reply_to_message and message.reply_to_message.from_user:
+        mentioned_ids.append(message.reply_to_message.from_user.id)
+
+    for uid in set(mentioned_ids):
+        if uid in _afk_users:
+            data = _afk_users[uid]
+            elapsed = _elapsed(data["since"])
+
+            # ── FIX: use "afk" gif type, NOT "couple" ──
+            gif = get_random_gif("afk")
+
+            try:
+                u = await app.get_users(uid)
+                display = _mention(u)
+            except Exception:
+                display = f"<a href='tg://user?id={uid}'>This user</a>"
+
+            text = (
+                f"<blockquote>"
+                f"😴 <b>{display} is currently AFK!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📝 <b>Reason:</b> {data['reason']}\n"
+                f"⏱ <b>AFK since:</b> {elapsed} ago"
+                f"</blockquote>"
+            )
+
+            try:
+                if gif:
+                    sent = await message.reply_animation(
+                        gif,
+                        caption=text,
+                        parse_mode=enums.ParseMode.HTML,
+                    )
+                else:
+                    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+            except Exception:
+                sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+
+            asyncio.create_task(_auto_delete(sent, AFK_DELETE_DELAY))
+
