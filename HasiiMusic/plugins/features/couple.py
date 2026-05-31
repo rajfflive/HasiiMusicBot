@@ -1,20 +1,16 @@
 """
-Couple Plugin — v3 FINAL (All English)
+Couple Plugin — v4 FIXED
 Place at: HasiiMusic/plugins/features/couple.py
 
 Commands:
-  /couple          - Randomly pair two members as today's couple
-  /mycouple        - Show your current couple partner
-  /couplebreak     - Break your current couple pairing
-  /coupletop       - Show top couples by pair count
-
-Note: Couple changes daily (auto-reset at midnight). Reply IS sent. Uses "couple" gif.
+  /couple / /couples  - Get today's random couple
+  /mycouple           - Check your partner
+  /couplebreak        - Break your pairing
 """
 
 import asyncio
 import random
-import time
-from datetime import datetime, date
+from datetime import date
 
 from pyrogram import enums, filters
 from pyrogram.types import Message
@@ -22,47 +18,41 @@ from pyrogram.types import Message
 from HasiiMusic import app
 from HasiiMusic.helpers.gif_manager import get_random_gif
 
-# ── Storage ──────────────────────────────────────────────────────────────────
-# { chat_id: { "date": "YYYY-MM-DD", "pair": (uid1, uid2), "count": {uid: int} } }
 _couples: dict[int, dict] = {}
 
-COUPLE_DELETE_DELAY = 86400  # 24 hours
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _mention(user) -> str:
-    name = (user.first_name or "User").replace("<", "&lt;").replace(">", "&gt;")
-    return f"<a href='tg://user?id={user.id}'>{name}</a>"
+LOVE_LINES = [
+    "A match written in the stars! 🌟",
+    "Love is in the air! 💨❤️",
+    "The algorithm has spoken! 🤖💘",
+    "Destiny brought them together! 🔮",
+    "Chemistry detected! 🧪❤️",
+    "Soulmates for today! 👫",
+    "The universe ships it! 🌌💕",
+]
 
 
 def _today() -> str:
     return date.today().isoformat()
 
 
-def _get_couple(chat_id: int) -> tuple[int, int] | None:
-    data = _couples.get(chat_id)
-    if not data:
+def _get_pair(chat_id: int):
+    d = _couples.get(chat_id)
+    if not d or d["date"] != _today():
+        _couples[chat_id] = {"date": _today(), "pair": None}
         return None
-    if data.get("date") != _today():
-        # Day changed — reset pair but keep history
-        _couples[chat_id]["pair"] = None
-        _couples[chat_id]["date"] = _today()
-        return None
-    return data.get("pair")
+    return d["pair"]
 
 
-def _set_couple(chat_id: int, uid1: int, uid2: int):
-    if chat_id not in _couples:
-        _couples[chat_id] = {"date": _today(), "pair": None, "count": {}}
-    _couples[chat_id]["date"] = _today()
-    _couples[chat_id]["pair"] = (uid1, uid2)
-    # Increment pair count
-    for uid in (uid1, uid2):
-        _couples[chat_id]["count"][uid] = _couples[chat_id]["count"].get(uid, 0) + 1
+def _set_pair(chat_id: int, uid1: int, uid2: int):
+    _couples[chat_id] = {"date": _today(), "pair": (uid1, uid2)}
 
 
-async def _auto_delete(msg: Message, delay: int = COUPLE_DELETE_DELAY):
+def _mention(user) -> str:
+    name = (user.first_name or "User").replace("<", "&lt;").replace(">", "&gt;")
+    return f"<a href='tg://user?id={user.id}'>{name}</a>"
+
+
+async def _del(msg, delay=86400):
     await asyncio.sleep(delay)
     try:
         await msg.delete()
@@ -70,44 +60,41 @@ async def _auto_delete(msg: Message, delay: int = COUPLE_DELETE_DELAY):
         pass
 
 
-# ── /couple ───────────────────────────────────────────────────────────────────
-
-@app.on_message(filters.command("couple") & filters.group)
-async def cmd_couple(_, message: Message):
+async def _do_couple(message: Message):
     chat_id = message.chat.id
 
-    # Check if today's couple already set
-    existing = _get_couple(chat_id)
-    if existing:
+    pair = _get_pair(chat_id)
+    if pair:
         try:
-            u1 = await app.get_users(existing[0])
-            u2 = await app.get_users(existing[1])
-            gif = get_random_gif("couple")
-            text = (
-                f"<blockquote>"
-                f"💑 <b>Today's Couple is Already Set!</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"💘 {_mention(u1)}\n"
-                f"💝 {_mention(u2)}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"❤️ Come back tomorrow for a new couple!"
-                f"</blockquote>"
-            )
+            u1 = await app.get_users(pair[0])
+            u2 = await app.get_users(pair[1])
+        except Exception:
+            _couples[chat_id]["pair"] = None
+            await _do_couple(message)
+            return
+
+        gif = get_random_gif("couple")
+        text = (
+            "<blockquote>"
+            "💑 <b>Today's Couple is Already Set!</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"💘 {_mention(u1)}\n"
+            f"💝 {_mention(u2)}\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "❤️ Come back tomorrow for a new couple!"
+            "</blockquote>"
+        )
+        try:
             if gif:
-                sent = await message.reply_animation(
-                    gif, caption=text, parse_mode=enums.ParseMode.HTML
-                )
+                sent = await message.reply_animation(gif, caption=text, parse_mode=enums.ParseMode.HTML)
             else:
                 sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
-            asyncio.create_task(_auto_delete(sent, COUPLE_DELETE_DELAY))
-        except Exception as e:
-            await message.reply(
-                f"<blockquote>❌ Error fetching couple info: {e}</blockquote>",
-                parse_mode=enums.ParseMode.HTML,
-            )
+        except Exception:
+            sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_del(sent))
         return
 
-    # Fetch group members
+    # Fetch members
     members = []
     try:
         async for m in app.get_chat_members(chat_id):
@@ -115,166 +102,108 @@ async def cmd_couple(_, message: Message):
                 members.append(m.user)
     except Exception as e:
         sent = await message.reply(
-            f"<blockquote>❌ <b>Failed to fetch members!</b>\n\n"
-            f"Make sure the bot is admin with Add Members permission.\n"
-            f"<code>{e}</code></blockquote>",
+            f"<blockquote>❌ <b>Couldn't fetch members!</b>\nMake sure I'm admin with Add Members permission.\n<code>{e}</code></blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(sent, 60))
+        asyncio.create_task(_del(sent, 30))
         return
 
     if len(members) < 2:
         sent = await message.reply(
-            "<blockquote>❌ Need at least 2 non-bot members to make a couple!</blockquote>",
+            "<blockquote>❌ Need at least 2 members to make a couple!</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(sent, 30))
+        asyncio.create_task(_del(sent, 20))
         return
 
-    # Pick two random distinct members
     u1, u2 = random.sample(members, 2)
-    _set_couple(chat_id, u1.id, u2.id)
+    _set_pair(chat_id, u1.id, u2.id)
 
     gif = get_random_gif("couple")
-
-    love_lines = [
-        "A match written in the stars! 🌟",
-        "Love is in the air! 💨❤️",
-        "The algorithm has spoken! 🤖💘",
-        "Destiny brought them together! 🔮",
-        "Today's dream team! 🏆💑",
-        "Chemistry detected! 🧪❤️",
-        "Soulmates for today! 👫",
-        "The universe ships it! 🌌💕",
-    ]
-
     text = (
-        f"<blockquote>"
-        f"💑 <b>Today's Couple!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        "<blockquote>"
+        "💑 <b>Today's Couple!</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         f"💘 {_mention(u1)}\n"
-        f"    &\n"
+        "    &\n"
         f"💝 {_mention(u2)}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💬 {random.choice(love_lines)}\n"
-        f"📅 Couple resets tomorrow!"
-        f"</blockquote>"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"💬 {random.choice(LOVE_LINES)}\n"
+        "📅 Resets tomorrow!"
+        "</blockquote>"
     )
 
     try:
         if gif:
-            sent = await message.reply_animation(
-                gif, caption=text, parse_mode=enums.ParseMode.HTML
-            )
+            sent = await message.reply_animation(gif, caption=text, parse_mode=enums.ParseMode.HTML)
         else:
             sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
     except Exception:
         sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
 
-    asyncio.create_task(_auto_delete(sent, COUPLE_DELETE_DELAY))
+    asyncio.create_task(_del(sent))
+
+
+# ── /couple AND /couples ──────────────────────────────────────────────────────
+
+@app.on_message(filters.command(["couple", "couples"]) & filters.group)
+async def cmd_couple(_, message: Message):
+    await _do_couple(message)
 
 
 # ── /mycouple ─────────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("mycouple") & filters.group)
 async def cmd_mycouple(_, message: Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else None
-
-    if not user_id:
+    if not message.from_user:
         return
 
-    pair = _get_couple(chat_id)
-    if not pair or user_id not in pair:
+    pair = _get_pair(message.chat.id)
+    if not pair or message.from_user.id not in pair:
         sent = await message.reply(
-            "<blockquote>💔 You don't have a couple today!\nUse /couple to get paired.</blockquote>",
+            "<blockquote>💔 You have no couple today!\nUse /couple to get paired.</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(sent, 30))
+        asyncio.create_task(_del(sent, 20))
         return
 
-    partner_id = pair[1] if pair[0] == user_id else pair[0]
+    partner_id = pair[1] if pair[0] == message.from_user.id else pair[0]
     try:
         partner = await app.get_users(partner_id)
         text = (
-            f"<blockquote>"
-            f"💑 <b>Your Today's Couple</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"💘 Your partner: {_mention(partner)}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📅 Resets tomorrow!"
-            f"</blockquote>"
-        )
-    except Exception:
-        text = (
             "<blockquote>"
-            "💑 You have a couple today!\n"
+            "💑 <b>Your Couple Today</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
+            f"💘 Partner: {_mention(partner)}\n"
             "📅 Resets tomorrow!"
             "</blockquote>"
         )
+    except Exception:
+        text = "<blockquote>💑 You have a couple today! 📅 Resets tomorrow!</blockquote>"
 
     sent = await message.reply(text, parse_mode=enums.ParseMode.HTML)
-    asyncio.create_task(_auto_delete(sent, COUPLE_DELETE_DELAY))
+    asyncio.create_task(_del(sent))
 
 
 # ── /couplebreak ──────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("couplebreak") & filters.group)
 async def cmd_couplebreak(_, message: Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else None
-
-    if not user_id:
+    if not message.from_user:
         return
 
-    pair = _get_couple(chat_id)
-    if not pair or user_id not in pair:
+    pair = _get_pair(message.chat.id)
+    if not pair or message.from_user.id not in pair:
         sent = await message.reply(
-            "<blockquote>💔 You don't have an active couple to break.</blockquote>",
+            "<blockquote>💔 No active couple to break.</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(sent, 30))
+        asyncio.create_task(_del(sent, 20))
         return
 
-    _couples[chat_id]["pair"] = None
-
+    _couples[message.chat.id]["pair"] = None
     sent = await message.reply(
-        "<blockquote>💔 <b>Couple broken!</b>\nUse /couple to get a new one.</blockquote>",
+        "<blockquote>💔 <b>Couple broken!</b> Use /couple to get a new one.</blockquote>",
         parse_mode=enums.ParseMode.HTML,
     )
-    asyncio.create_task(_auto_delete(sent, 30))
-
-
-# ── /coupletop ────────────────────────────────────────────────────────────────
-
-@app.on_message(filters.command("coupletop") & filters.group)
-async def cmd_coupletop(_, message: Message):
-    chat_id = message.chat.id
-    data = _couples.get(chat_id)
-
-    if not data or not data.get("count"):
-        sent = await message.reply(
-            "<blockquote>📊 No couple history yet! Use /couple to start.</blockquote>",
-            parse_mode=enums.ParseMode.HTML,
-        )
-        asyncio.create_task(_auto_delete(sent, 30))
-        return
-
-    sorted_counts = sorted(data["count"].items(), key=lambda x: x[1], reverse=True)[:10]
-
-    lines = ["💑 <b>Top Couples (by appearances)</b>\n━━━━━━━━━━━━━━━━━━"]
-    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 10
-
-    for i, (uid, count) in enumerate(sorted_counts):
-        try:
-            u = await app.get_users(uid)
-            name = (u.first_name or "User").replace("<", "&lt;").replace(">", "&gt;")
-            display = f"<a href='tg://user?id={uid}'>{name}</a>"
-        except Exception:
-            display = f"<a href='tg://user?id={uid}'>User {uid}</a>"
-        lines.append(f"{medals[i]} {display} — {count} time{'s' if count != 1 else ''}")
-
-    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
-    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
-    asyncio.create_task(_auto_delete(sent, COUPLE_DELETE_DELAY))
+    asyncio.create_task(_del(sent, 20))
