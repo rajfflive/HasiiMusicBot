@@ -1,44 +1,43 @@
 """
-Couple Plugin — v2 with GIF Manager
+Couple Plugin — v3 FIXED
 Commands:
-  /couple @user      - Ship with mentioned user (love%, GIF, loving line)
-  /uncouple          - Break up
-  /mycouple          - Your couple status
-  /couples           - Today's random couple
-  /couplerank        - Top couples by days
+  /couple @user   - Ship yourself with someone
+  /uncouple       - Break up
+  /mycouple       - Check your couple status
+  /couples        - Random couple from group members
+  /couplerank     - Top couples by duration
 
 GIF Management (owner/sudo/admin only):
-  /setcouplegif      - Reply to GIF → add to couple list
-  /setcouplegif naam - Reply to GIF + give custom name
-  /rmcouplegif <n>   - Remove couple GIF by number
-  /listcouplegif     - See all couple GIFs with numbers
+  /setcouplegif   - Reply to GIF → add to couple list
+  /rmcouplegif <n>- Remove couple GIF by number
+  /listcouplegif  - See all couple GIFs
+
+FIX: @Client.on_message → @app.on_message  (yahi main bug tha)
 """
 
 import random
 import time
 from datetime import timedelta
-from pyrogram import Client, filters
+
+from pyrogram import filters
 from pyrogram.types import Message
 from pymongo import MongoClient as PyMongoClient
 
-from HasiiMusic.helpers.gif_manager import (
-    get_random_gif, register_gif_commands,
-)
+from HasiiMusic.helpers.gif_manager import get_random_gif, register_gif_commands
+from HasiiMusic import app
 
 try:
-    from HasiiMusic.core.mongo import mongodb as db
+    from HasiiMusic.core.mongo import mongodb as _db
 except ImportError:
     import os
-    _client = PyMongoClient(os.getenv("MONGO_DB_URI", "mongodb://localhost:27017"))
-    db = _client["HasiiMusicBot"]
+    _c = PyMongoClient(os.getenv("MONGO_DB_URI", "mongodb://localhost:27017"))
+    _db = _c["HasiiMusicBot"]
 
-couples_col = db["couples"]
+couples_col = _db["couples"]
 
 COUPLE_LINES = [
-    "Tumhara dil mere liye aur mera dil tumhare liye 💘",
-    "Is duniya mein koi nahi tumhare jaisa, dil de diya tumhein 🥰",
-    "Tum mile toh zindagi ka matlab samajh aaya 💞",
-    "Kuch log kismat se milte hain, aur tum kismat ban jaate ho 🌸",
+    "Dil ne dil ko dhundha, mil gaye 💞",
+    "Tumhara pyaar hi meri duniya hai 🌍❤️",
     "Teri baahon mein ek alag hi sukoon hai 💑",
     "Mohabbat ka doosra naam hai — tum 💓",
     "Aaj ke couple ne dil jeet liya! 🏆❤️",
@@ -110,17 +109,15 @@ def break_couple(user_id: int):
 
 
 # ─── GIF management commands ─────────────────────────────────────────────────
-try:
-    from HasiiMusic import app as _app
-    register_gif_commands(_app, "couple", "couple")
-except Exception:
-    pass
+register_gif_commands(app, "couple", "couple")
 
 
 # ─── /couple ─────────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("couple") & filters.group)
-async def couple_cmd(client: Client, message: Message):
+@app.on_message(filters.command("couple") & filters.group)
+async def couple_cmd(client, message: Message):
     user = message.from_user
+    if not user:
+        return
     target = None
 
     if message.reply_to_message and message.reply_to_message.from_user:
@@ -140,7 +137,10 @@ async def couple_cmd(client: Client, message: Message):
 
     if not target:
         return await message.reply(
-            "<blockquote>💔 Mention ya reply karo jis se couple banana hai!</blockquote>"
+            "<blockquote>💔 Mention ya reply karo jis se couple banana hai!\n\n"
+            "Usage: <code>/couple @username</code>\n"
+            "Ya kisi message ko reply karke <code>/couple</code> likho</blockquote>",
+            parse_mode="html"
         )
     if target.id == user.id:
         return await message.reply(
@@ -186,13 +186,22 @@ async def couple_cmd(client: Client, message: Message):
         f"🎉 Congratulations to the new couple!"
         f"</blockquote>"
     )
-    await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+
+    if gif:
+        try:
+            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+            return
+        except Exception:
+            pass
+    await message.reply(caption, parse_mode="html")
 
 
 # ─── /uncouple ───────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("uncouple") & filters.group)
-async def uncouple_cmd(client: Client, message: Message):
+@app.on_message(filters.command("uncouple") & filters.group)
+async def uncouple_cmd(client, message: Message):
     user = message.from_user
+    if not user:
+        return
     doc = get_couple(user.id)
     if not doc:
         return await message.reply(
@@ -218,9 +227,11 @@ async def uncouple_cmd(client: Client, message: Message):
 
 
 # ─── /mycouple ───────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("mycouple") & (filters.group | filters.private))
-async def mycouple_cmd(client: Client, message: Message):
+@app.on_message(filters.command("mycouple") & (filters.group | filters.private))
+async def mycouple_cmd(client, message: Message):
     user = message.from_user
+    if not user:
+        return
     doc = get_couple(user.id)
     if not doc:
         return await message.reply(
@@ -246,13 +257,18 @@ async def mycouple_cmd(client: Client, message: Message):
     )
 
 
-# ─── /couples ────────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("couples") & filters.group)
-async def couples_random_cmd(client: Client, message: Message):
+# ─── /couples — random pair from group members ───────────────────────────────
+@app.on_message(filters.command("couples") & filters.group)
+async def couples_random_cmd(client, message: Message):
     members = []
-    async for member in client.get_chat_members(message.chat.id):
-        if not member.user.is_bot and not member.user.is_deleted:
-            members.append(member.user)
+    try:
+        async for member in client.get_chat_members(message.chat.id):
+            if not member.user.is_bot and not member.user.is_deleted:
+                members.append(member.user)
+    except Exception as e:
+        return await message.reply(
+            f"<blockquote>❌ Members fetch nahi ho sake: {e}</blockquote>"
+        )
 
     if len(members) < 2:
         return await message.reply(
@@ -263,23 +279,27 @@ async def couples_random_cmd(client: Client, message: Message):
     pct = _love_percent(u1.id, u2.id)
     gif = get_random_gif("couple")
 
-    await client.send_animation(
-        message.chat.id, gif,
-        caption=(
-            f"<blockquote>"
-            f"💘 <b>Today's Best Couple! 🏆</b>\n\n"
-            f"❤️ {u1.mention}\n╰┈➤ ❤️‍🔥 ➤\n💕 {u2.mention}\n\n"
-            f"💖 <b>Love Meter:</b> {pct}%\n{_love_bar(pct)}\n\n"
-            f"<i>{random.choice(TODAYS_COUPLE_LINES)}</i>"
-            f"</blockquote>"
-        ),
-        parse_mode="html"
+    caption = (
+        f"<blockquote>"
+        f"💘 <b>Today's Best Couple! 🏆</b>\n\n"
+        f"❤️ {u1.mention}\n╰┈➤ ❤️‍🔥 ➤\n💕 {u2.mention}\n\n"
+        f"💖 <b>Love Meter:</b> {pct}%\n{_love_bar(pct)}\n\n"
+        f"<i>{random.choice(TODAYS_COUPLE_LINES)}</i>"
+        f"</blockquote>"
     )
+
+    if gif:
+        try:
+            await client.send_animation(message.chat.id, gif, caption=caption, parse_mode="html")
+            return
+        except Exception:
+            pass
+    await message.reply(caption, parse_mode="html")
 
 
 # ─── /couplerank ─────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("couplerank") & filters.group)
-async def couplerank_cmd(client: Client, message: Message):
+@app.on_message(filters.command("couplerank") & filters.group)
+async def couplerank_cmd(client, message: Message):
     all_docs = list(couples_col.find().sort("since", 1))
     seen, ranked = set(), []
     for doc in all_docs:
@@ -301,9 +321,9 @@ async def couplerank_cmd(client: Client, message: Message):
         try:
             u1 = await client.get_users(pair[0])
             u2 = await client.get_users(pair[1])
-            text += f"{medal} {u1.first_name} ❤️ {u2.first_name} — <b>{_days_fmt(now-since)}</b> | 💖{pct}%\n"
+            text += f"{medal} {u1.first_name} ❤️ {u2.first_name} — <b>{_days_fmt(now - since)}</b> | 💖{pct}%\n"
         except Exception:
-            text += f"{medal} ID#{pair[0]} ❤️ ID#{pair[1]} — <b>{_days_fmt(now-since)}</b> | 💖{pct}%\n"
+            text += f"{medal} ID#{pair[0]} ❤️ ID#{pair[1]} — <b>{_days_fmt(now - since)}</b> | 💖{pct}%\n"
     text += "</blockquote>"
 
     await message.reply(text, parse_mode="html")
