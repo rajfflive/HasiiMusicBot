@@ -1,17 +1,18 @@
 """
-Welcome Plugin — v4 SHORT
+Welcome Plugin — v5 PREMIUM
 Place at: HasiiMusic/plugins/features/welcome.py
 
 Commands (admin only):
-  /setwel <text>   - Set welcome message
-  /wel             - Preview current welcome
-  /welon           - Enable welcome
-  /weloff          - Disable welcome
+  /setwel <text>  - Set custom welcome
+  /wel            - Preview welcome
+  /welon          - Enable welcome
+  /weloff         - Disable welcome
 
 Placeholders: {mention} {first} {username} {count} {chat}
 """
 
 import asyncio
+import random
 
 from pyrogram import enums, filters
 from pyrogram.types import Message
@@ -21,12 +22,17 @@ from HasiiMusic.helpers.gif_manager import get_random_gif
 
 _cfg: dict[int, dict] = {}
 
-DEFAULT_WELCOME = (
-    "👋 Welcome {mention} to <b>{chat}</b>!\n"
-    "━━━━━━━━━━━━━━━━━━\n"
-    "🎉 You are member <b>#{count}</b>.\n"
-    "📜 Please follow the group rules and enjoy!"
-)
+WELCOME_QUOTES = [
+    "Every expert was once a beginner. Welcome aboard! 🚀",
+    "New member, new energy! Glad to have you. ✨",
+    "The more the merrier! Welcome to the family. 🎊",
+    "Great minds think alike — and you just joined them. 💡",
+    "Your journey with us starts now. Make it legendary! 🏆",
+    "We were good before. Now with you, we're even better! 🌟",
+    "A new chapter begins. Welcome, and enjoy the ride! 🎯",
+]
+
+BADGES = ["🌟", "💎", "🔥", "⭐", "🎯", "👑", "🏆", "🦋"]
 
 
 def _get(chat_id: int) -> dict:
@@ -50,7 +56,32 @@ def _fmt(template: str, user, chat, count: int) -> str:
     )
 
 
-async def _is_admin(chat_id: int, user_id: int) -> bool:
+def _build_welcome(user, chat, count: int) -> str:
+    first = (user.first_name or "Friend").replace("<", "&lt;").replace(">", "&gt;")
+    mention = f"<a href='tg://user?id={user.id}'>{first}</a>"
+    chat_name = (chat.title or "our group").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        f"<blockquote>"
+        f"┌──────────────────────\n"
+        f"│  {random.choice(BADGES)}  WELCOME!\n"
+        f"└──────────────────────\n"
+        f"\n"
+        f"👋 Hey {mention}!\n"
+        f"You just joined <b>{chat_name}</b> ✨\n"
+        f"\n"
+        f"─────────────────────\n"
+        f"🎊 <b>Member Count:</b> #{count}\n"
+        f"─────────────────────\n"
+        f"\n"
+        f"💬 <i>{random.choice(WELCOME_QUOTES)}</i>\n"
+        f"\n"
+        f"📌 Read the group rules.\n"
+        f"🤝 Be respectful & have fun!"
+        f"</blockquote>"
+    )
+
+
+async def _is_admin(chat_id, user_id) -> bool:
     try:
         m = await app.get_chat_member(chat_id, user_id)
         return m.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
@@ -66,116 +97,85 @@ async def _del(msg, delay=60):
         pass
 
 
-# ── Join handler ──────────────────────────────────────────────────────────────
-
 @app.on_message(filters.new_chat_members & filters.group)
 async def on_join(_, message: Message):
     chat_id = message.chat.id
     cfg = _get(chat_id)
     if not cfg["on"]:
         return
-
     for user in message.new_chat_members:
         if user.is_bot:
             continue
-
         try:
             count = await app.get_chat_members_count(chat_id)
         except Exception:
             count = 0
-
-        template = cfg["text"] or DEFAULT_WELCOME
-        text = "<blockquote>" + _fmt(template, user, message.chat, count) + "</blockquote>"
-
+        text = "<blockquote>" + _fmt(cfg["text"], user, message.chat, count) + "</blockquote>" if cfg["text"] else _build_welcome(user, message.chat, count)
         gif = get_random_gif("welcome")
         try:
-            if gif:
-                sent = await message.reply_animation(gif, caption=text, parse_mode=enums.ParseMode.HTML)
-            else:
-                sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+            sent = await message.reply_animation(gif, caption=text, parse_mode=enums.ParseMode.HTML) if gif else await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
         except Exception:
             sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
-
         asyncio.create_task(_del(sent, 86400))
 
-
-# ── /setwel ───────────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("setwel") & filters.group)
 async def cmd_setwel(_, message: Message):
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
-        sent = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
-        asyncio.create_task(_del(sent, 10))
+        s = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_del(s, 10))
         return
-
     text = " ".join(message.command[1:]).strip()
     if not text:
-        sent = await message.reply(
-            "<blockquote>⚠️ <b>Usage:</b> /setwel &lt;message&gt;\n\n"
-            "Placeholders:\n{mention} {first} {username} {count} {chat}</blockquote>",
+        s = await message.reply(
+            "<blockquote>⚠️ <b>Usage:</b> /setwel &lt;message&gt;\n\n<b>Placeholders:</b>\n"
+            "• <code>{mention}</code> — clickable name\n• <code>{first}</code> — first name\n"
+            "• <code>{username}</code> — @username\n• <code>{count}</code> — member number\n"
+            "• <code>{chat}</code> — group name</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(_del(sent, 30))
+        asyncio.create_task(_del(s, 30))
         return
-
     _get(message.chat.id)["text"] = text
-    sent = await message.reply("<blockquote>✅ Welcome message set!</blockquote>", parse_mode=enums.ParseMode.HTML)
-    asyncio.create_task(_del(sent, 15))
+    s = await message.reply("<blockquote>✅ Welcome message updated!</blockquote>", parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_del(s, 15))
 
-
-# ── /wel (preview) ────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("wel") & filters.group)
 async def cmd_wel(_, message: Message):
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
-        sent = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
-        asyncio.create_task(_del(sent, 10))
+        s = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_del(s, 10))
         return
-
     cfg = _get(message.chat.id)
     status = "✅ ON" if cfg["on"] else "❌ OFF"
-    template = cfg["text"] or DEFAULT_WELCOME
-
     try:
         count = await app.get_chat_members_count(message.chat.id)
     except Exception:
         count = 0
+    text = "<blockquote>" + _fmt(cfg["text"], message.from_user, message.chat, count) + "</blockquote>" if cfg["text"] else _build_welcome(message.from_user, message.chat, count)
+    header = f"<blockquote>📋 <b>Welcome Preview</b> [{status}]</blockquote>\n"
+    s = await message.reply(header + text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+    asyncio.create_task(_del(s, 30))
 
-    preview = _fmt(template, message.from_user, message.chat, count)
-    text = (
-        f"<blockquote>"
-        f"📋 <b>Welcome Preview</b> [{status}]\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"{preview}"
-        f"</blockquote>"
-    )
-    sent = await message.reply(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
-    asyncio.create_task(_del(sent, 30))
-
-
-# ── /welon ────────────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("welon") & filters.group)
 async def cmd_welon(_, message: Message):
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
-        sent = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
-        asyncio.create_task(_del(sent, 10))
+        s = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_del(s, 10))
         return
-
     _get(message.chat.id)["on"] = True
-    sent = await message.reply("<blockquote>✅ Welcome messages <b>enabled!</b></blockquote>", parse_mode=enums.ParseMode.HTML)
-    asyncio.create_task(_del(sent, 15))
+    s = await message.reply("<blockquote>✅ Welcome <b>enabled!</b></blockquote>", parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_del(s, 15))
 
-
-# ── /weloff ───────────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("weloff") & filters.group)
 async def cmd_weloff(_, message: Message):
     if not message.from_user or not await _is_admin(message.chat.id, message.from_user.id):
-        sent = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
-        asyncio.create_task(_del(sent, 10))
+        s = await message.reply("<blockquote>🚫 Admins only.</blockquote>", parse_mode=enums.ParseMode.HTML)
+        asyncio.create_task(_del(s, 10))
         return
-
     _get(message.chat.id)["on"] = False
-    sent = await message.reply("<blockquote>❌ Welcome messages <b>disabled!</b></blockquote>", parse_mode=enums.ParseMode.HTML)
-    asyncio.create_task(_del(sent, 15))
+    s = await message.reply("<blockquote>❌ Welcome <b>disabled!</b></blockquote>", parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_del(s, 15))
